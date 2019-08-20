@@ -1,1 +1,5 @@
-build/CMakeCache.txt
+build/*
+bin/*
+include/generated/*
+!include/generated/.gitkeep
+Cu_std/*
