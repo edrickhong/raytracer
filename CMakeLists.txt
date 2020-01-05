@@ -85,6 +85,7 @@ set(CMAKE_C_IMPLICIT_LINK_DIRECTORIES "")
 
 
 add_executable(raytracer ${RAYTRACER})
+target_link_libraries(raytracer cu_std ${PLATFORM_LIBS})
 
 set_target_properties(raytracer PROPERTIES LINKER_LANGUAGE C)
 
