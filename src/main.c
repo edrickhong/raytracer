@@ -1,9 +1,8 @@
+#include "mmath.h"
+#include "mode.h"
 #include "stdio.h"
 #include "stdlib.h"
-
-#include "mode.h"
 #include "ttype.h"
-
 #include "wwindow.h"
 
 void ClearBackBuffer(WBackBufferContext* buffer) {
