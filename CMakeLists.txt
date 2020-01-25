@@ -1,5 +1,6 @@
 option(BUILD_STEP "" ON)
 option(DEBUG "" ON)
+option(VERBOSE OFF)
 
 # kept because we change these often (Linux compiler flags)
 if(UNIX)
@@ -13,7 +14,7 @@ if(UNIX)
 
 	if(DEBUG)
 		# -mavx 
-		set(OPT_FLAGS "-g -O0 -fno-omit-frame-pointer -fstack-protector-strong")
+		set(OPT_FLAGS "-g -Og -fno-omit-frame-pointer -fstack-protector-strong")
 
 	endif()
 

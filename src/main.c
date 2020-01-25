@@ -2,36 +2,92 @@
 #include "mode.h"
 #include "stdio.h"
 #include "stdlib.h"
+#include "string.h"
 #include "ttype.h"
 #include "wwindow.h"
+//#include "random.h"
+
+/*
+NOTE: We won't bother with AA for now. It's basically shooting more rays into a
+pixel and blending.
+ */
 
 typedef struct Sphere {
 	Vec3 pos;
 	f32 radius;
 } Sphere;
 
+typedef struct RMaterial {
+	Color diffuse;
+	f32 emittance;
+	f32 scatter;
+} RMaterial;
+
+typedef struct RSphere {
+	Sphere sphere;
+	u32 material_index;
+} RSphere;
+
+typedef struct RPlane {
+	Plane plane;
+	u32 material_index;
+} RPlane;
+
+_global RMaterial materials[] = {
+    {0, 0, 1, 1}, {1, 0, 0, 1}, {0, 1, 0, 1}, {1, 1, 0, 1}, {0, 1, 1, 1},
+};
+_global RSphere spheres[] = {
+    {.sphere = {{0, 0, 10}, 3}, .material_index = 2},
+    {.sphere = {{-15, 5, 20}, 5}, .material_index = 3},
+    {.sphere = {{20, 8, 30}, 7}, .material_index = 4},
+};
+_global RPlane planes[] = {
+    {.plane = {{0, -1, 0}, {0, 1, 0}}, .material_index = 1},
+};
+
+f32 RandZeroToOne() { return (f32)rand() / (f32)RAND_MAX; }
+f32 RandNegOneToOne() {
+	f32 value = (f32) rand() / (f32)(RAND_MAX >> 2);
+	return value;
+}
+Vec3 ReflectVec3(Vec3 vec, Vec3 normal) {
+	return Vec3Add(vec, Vec3MulConstR(ProjectOntoVec3(vec, normal), 2.0f));
+}
+
+Vec3 GetSphereNormalVe3(Sphere sphere, Point3 point_on_sphere) {
+	Vec3 normal = Vec3Sub(point_on_sphere, sphere.pos);
+
+#ifdef DEBUG
+	//_kill("point is not on sphere\n",MagnitudeVec3(normal) !=
+	// sphere.radius);
+#endif
+
+	return NormalizeVec3(normal);
+}
+
 b32 IntersectOutLine3Sphere(Line3 line, Sphere sphere, Point3* point) {
+	RSphere s = {.sphere = {.pos = {0}, 3}, .material_index = 2};
 
-	Vec3 sphere_to_ray = Vec3Sub(sphere.pos,line.pos);
+	Vec3 sphere_to_ray = Vec3Sub(sphere.pos, line.pos);
 
-	f32 a = DotVec3(line.dir,line.dir);
-	f32 b = -2.0f * DotVec3(line.dir,sphere_to_ray);
-	f32 c = DotVec3(sphere_to_ray,sphere_to_ray) - (sphere.radius * sphere.radius);
+	f32 a = DotVec3(line.dir, line.dir);
+	f32 b = -2.0f * DotVec3(line.dir, sphere_to_ray);
+	f32 c = DotVec3(sphere_to_ray, sphere_to_ray) -
+		(sphere.radius * sphere.radius);
 	f32 discriminant = (b * b) - (4.0f * a * c);
 
-	if(discriminant < 0.0f){
+	if (discriminant < 0.0f) {
 		return 0;
 	}
 
 	f32 root = sqrtf(discriminant);
-	f32 t0 = ((-1.0f * b) + root)/(2.0f * a);
-	f32 t1 = ((-1.0f * b) - root)/(2.0f * a);
+	f32 t0 = ((-1.0f * b) + root) / (2.0f * a);
+	f32 t1 = ((-1.0f * b) - root) / (2.0f * a);
 
-	if(t0 < t1){
-		*point = Vec3Add((Vec3MulConstR(line.dir,t0)),line.pos);
-	}
-	else{
-		*point = Vec3Add((Vec3MulConstR(line.dir,t1)),line.pos);
+	if (t0 < t1) {
+		*point = Vec3Add((Vec3MulConstR(line.dir, t0)), line.pos);
+	} else {
+		*point = Vec3Add((Vec3MulConstR(line.dir, t1)), line.pos);
 	}
 
 	return 1;
@@ -47,53 +103,65 @@ u32 ColorToPixelColor(Color color) {
 			    (u32)(color.g * 255.0f), (u32)(color.b * 255.0f));
 }
 
+// we need to produce the bounces as well
 u32 CastRay(Vec3 camerapos, Vec3 gridpos) {
-	Color color = {0, 0, 1, 1};
+	u32 mat_index = 0;
+	f32 depth = 2147483647;
+	Vec3 next_normal = {0};
 
 	Vec3 dir = NormalizeVec3(Vec3Sub(gridpos, camerapos));
 	Ray3 ray = {camerapos, dir};
-	Vec3 last_hitpoint = {1000,1000,1000};
 
-	{
-		// hardcoded plane
-		Plane plane = {{0, -1.0f, 0}, {0, 1, 0}};
+	for (u32 i = 0; i < _arraycount(planes); i++) {
 		Point3 hitpoint = {0};
+		RPlane plane = planes[i];
 
-		if (IntersectOutLine3Plane(ray, plane, &hitpoint)) {
+		if (IntersectOutLine3Plane(ray, plane.plane, &hitpoint)) {
 			Vec3 camera_to_hitpoint =
 			    NormalizeVec3(Vec3Sub(hitpoint, camerapos));
 			f32 dot = DotVec3(camera_to_hitpoint, dir);
 
-			if (dot > 0.0f) {
-				color.r = 1.0f;
-				color.g = 0.0f;
-				color.b = 0.0f;
+			if (dot > 0.0f && hitpoint.z < depth) {
+				mat_index = plane.material_index;
+				depth = hitpoint.z;
 
-				last_hitpoint = hitpoint; 
+				next_normal = plane.plane.norm;
 			}
 		}
 	}
 
-	{
-		// hardcoded sphere
-		Sphere sphere = {{0, 0.0f, 10.0f}, 3.0f};
+	for (u32 i = 0; i < _arraycount(spheres); i++) {
+		RSphere sphere = spheres[i];
 		Point3 hitpoint = {0};
 
-		if(IntersectOutLine3Sphere(ray,sphere,&hitpoint)){
+		if (IntersectOutLine3Sphere(ray, sphere.sphere, &hitpoint)) {
+			if (hitpoint.z < depth) {
+				mat_index = sphere.material_index;
+				depth = hitpoint.z;
 
-			Vec3 lasthit_to_camera = Vec3Sub(last_hitpoint,camerapos);
-			Vec3 hitpoint_to_camera = Vec3Sub(hitpoint,camerapos);
+				next_normal =
+				    GetSphereNormalVe3(sphere.sphere, hitpoint);
 
-			if(MagnitudeVec3(hitpoint_to_camera) < MagnitudeVec3(lasthit_to_camera)){
-				color.r = 0.0f;
-				color.g = 1.0f;
-				color.b = 0.0f;
+// output the sphere normal as the color
+#if 0
+				{
+					Vec3 normal = GetSphereNormalVe3(
+					    sphere.sphere, hitpoint);
+					return ColorToPixelColor(
+					    Vec3ToVec4(normal));
+				}
+#endif
 			}
-
 		}
 	}
 
-	return ColorToPixelColor(color);
+	if (mat_index) {
+		Vec3 reflected = ReflectVec3(ray.dir, next_normal);
+
+		// scattered rays
+	}
+
+	return ColorToPixelColor(materials[mat_index].diffuse);
 }
 
 Vec3 PixelPosToGridPos(Vec3 camerapos, u32 x, u32 y, u32 width, u32 height,
@@ -109,6 +177,12 @@ Vec3 PixelPosToGridPos(Vec3 camerapos, u32 x, u32 y, u32 width, u32 height,
 	gridpos.x = ((f32)(x)-h_w) / h_w;
 	gridpos.y = (((f32)(y)-h_h) / h_h) * -1.0f;
 	gridpos.z = z;
+
+	if (width > height) {
+		gridpos.y *= (f32)height / (f32)width;
+	} else if (height > width) {
+		gridpos.x *= (f32)width / (f32)height;
+	}
 
 	return gridpos;
 }
@@ -130,10 +204,9 @@ s32 main(s32 argc, const s8** argv) {
 	WWindowContext window = WCreateWindow(
 	    "Raytracer",
 	    (WCreateFlags)(W_CREATE_NORESIZE | W_CREATE_BACKEND_XLIB), 0, 0,
-	    1280, 1280);
+	    1280, 720);
 
 	WBackBufferContext backbuffer = WCreateBackBuffer(&window);
-
 	WWindowEvent event = {0};
 
 	b32 run = 1;
@@ -141,6 +214,7 @@ s32 main(s32 argc, const s8** argv) {
 	Vec3 camerapos = {0};
 
 	while (run) {
+		// clear the depth buffer
 		CastRays(&backbuffer, camerapos, 1.0f);
 		WPresentBackBuffer(&window, &backbuffer);
 
