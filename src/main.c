@@ -12,6 +12,8 @@ NOTE: We won't bother with AA for now. It's basically shooting more rays into a
 pixel and blending.
  */
 
+#define _rays_per_pixel 4
+
 typedef struct Sphere {
 	Vec3 pos;
 	f32 radius;
@@ -47,7 +49,7 @@ _global RPlane planes[] = {
 
 f32 RandZeroToOne() { return (f32)rand() / (f32)RAND_MAX; }
 f32 RandNegOneToOne() {
-	f32 value = (f32) rand() / (f32)(RAND_MAX >> 2);
+	f32 value = (f32)rand() / (f32)(RAND_MAX >> 2);
 	return value;
 }
 Vec3 ReflectVec3(Vec3 vec, Vec3 normal) {
@@ -58,8 +60,8 @@ Vec3 GetSphereNormalVe3(Sphere sphere, Point3 point_on_sphere) {
 	Vec3 normal = Vec3Sub(point_on_sphere, sphere.pos);
 
 #ifdef DEBUG
-	//_kill("point is not on sphere\n",MagnitudeVec3(normal) !=
-	// sphere.radius);
+//_kill("point is not on sphere\n",MagnitudeVec3(normal) !=
+// sphere.radius);
 #endif
 
 	return NormalizeVec3(normal);
@@ -104,13 +106,10 @@ u32 ColorToPixelColor(Color color) {
 }
 
 // we need to produce the bounces as well
-u32 CastRay(Vec3 camerapos, Vec3 gridpos) {
+Color CastRay(Vec3 camerapos, Ray3 ray) {
 	u32 mat_index = 0;
-	f32 depth = 2147483647;
+	Vec3 next_point = {0, 0, 2147483647.0f};
 	Vec3 next_normal = {0};
-
-	Vec3 dir = NormalizeVec3(Vec3Sub(gridpos, camerapos));
-	Ray3 ray = {camerapos, dir};
 
 	for (u32 i = 0; i < _arraycount(planes); i++) {
 		Point3 hitpoint = {0};
@@ -119,12 +118,12 @@ u32 CastRay(Vec3 camerapos, Vec3 gridpos) {
 		if (IntersectOutLine3Plane(ray, plane.plane, &hitpoint)) {
 			Vec3 camera_to_hitpoint =
 			    NormalizeVec3(Vec3Sub(hitpoint, camerapos));
-			f32 dot = DotVec3(camera_to_hitpoint, dir);
+			f32 dot = DotVec3(camera_to_hitpoint, ray.dir);
 
-			if (dot > 0.0f && hitpoint.z < depth) {
+			if (dot > 0.0f && hitpoint.z < next_point.z) {
 				mat_index = plane.material_index;
-				depth = hitpoint.z;
 
+				next_point = hitpoint;
 				next_normal = plane.plane.norm;
 			}
 		}
@@ -135,10 +134,10 @@ u32 CastRay(Vec3 camerapos, Vec3 gridpos) {
 		Point3 hitpoint = {0};
 
 		if (IntersectOutLine3Sphere(ray, sphere.sphere, &hitpoint)) {
-			if (hitpoint.z < depth) {
+			if (hitpoint.z < next_point.z) {
 				mat_index = sphere.material_index;
-				depth = hitpoint.z;
 
+				next_point = hitpoint;
 				next_normal =
 				    GetSphereNormalVe3(sphere.sphere, hitpoint);
 
@@ -156,16 +155,24 @@ u32 CastRay(Vec3 camerapos, Vec3 gridpos) {
 	}
 
 	if (mat_index) {
-		Vec3 reflected = ReflectVec3(ray.dir, next_normal);
+
+		Vec3 attenuation = {1,1,1};
+
+		Vec3 reflected =
+		    NormalizeVec3(ReflectVec3(ray.dir, next_normal));
+		Ray3 next_ray = {next_point, reflected}; // directly reflected ray
+
+		CastRays(camerapos,next_ray);
 
 		// scattered rays
 	}
 
-	return ColorToPixelColor(materials[mat_index].diffuse);
+	return materials[mat_index].diffuse;
 }
 
-Vec3 PixelPosToGridPos(Vec3 camerapos, u32 x, u32 y, u32 width, u32 height,
-		       f32 z) {
+// maps a pixel to a 3d grid. the vector is at the top left of the pixel, not
+// the center
+Vec3 PixelPosToGridPos(u32 x, u32 y, u32 width, u32 height, f32 z) {
 	/*
 	 *grid coords go from -1 <= x <= 1 and -1 <= y <= 1
 	 * */
@@ -188,14 +195,45 @@ Vec3 PixelPosToGridPos(Vec3 camerapos, u32 x, u32 y, u32 width, u32 height,
 }
 
 void CastRays(WBackBufferContext* buffer, Vec3 camerapos, f32 z) {
+	Vec3 grid_width;
+	Vec3 grid_height;
+
+	{
+		Vec3 start =
+		    PixelPosToGridPos(0, 0, buffer->width, buffer->height, 1);
+
+		Vec3 x =
+		    PixelPosToGridPos(1, 0, buffer->width, buffer->height, 1);
+		Vec3 y =
+		    PixelPosToGridPos(0, 1, buffer->width, buffer->height, 1);
+
+		grid_width = Vec3Sub(x, start);
+		grid_height = Vec3Sub(y, start);
+	}
+
 	for (u32 y = 0; y < buffer->height; y++) {
 		for (u32 x = 0; x < buffer->width; x++) {
-			Vec3 gridpos =
-			    PixelPosToGridPos(camerapos, x, y, buffer->width,
-					      buffer->height, 1.0f);
+			Vec3 gridpos = PixelPosToGridPos(x, y, buffer->width,
+							 buffer->height, 1.0f);
+
+			Color color = {0};
+
+			for (u32 i = 0; i < _rays_per_pixel; i++) {
+				Vec3 rand_offset =
+				    Vec3Add(grid_width, grid_height);
+				rand_offset =
+				    Vec3MulConstR(rand_offset, RandZeroToOne());
+				gridpos = Vec3Add(gridpos, rand_offset);
+				Vec3 dir =
+				    NormalizeVec3(Vec3Sub(gridpos, camerapos));
+				Ray3 ray = {camerapos, dir};
+				color = Vec4Add(color, CastRay(camerapos, ray));
+			}
+
+			color = Vec4DivConstR(color, (f32)_rays_per_pixel);
 
 			u32* pixel = buffer->pixels + (buffer->width * y) + x;
-			*pixel = CastRay(camerapos, gridpos);
+			*pixel = ColorToPixelColor(color);
 		}
 	}
 }
@@ -213,9 +251,12 @@ s32 main(s32 argc, const s8** argv) {
 
 	Vec3 camerapos = {0};
 
+	printf("casting %d rays...\n",
+	       backbuffer.width * backbuffer.height * _rays_per_pixel);
+
+	CastRays(&backbuffer, camerapos, 1.0f);
+
 	while (run) {
-		// clear the depth buffer
-		CastRays(&backbuffer, camerapos, 1.0f);
 		WPresentBackBuffer(&window, &backbuffer);
 
 		while (WWaitForWindowEvent(&window, &event)) {
