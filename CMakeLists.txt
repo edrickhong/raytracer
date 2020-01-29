@@ -14,7 +14,7 @@ if(UNIX)
 
 	if(DEBUG)
 		# -mavx 
-		set(OPT_FLAGS "-g -Og -fno-omit-frame-pointer -fstack-protector-strong")
+		set(OPT_FLAGS "-g -O0 -fno-omit-frame-pointer -fstack-protector-strong")
 
 	endif()
 

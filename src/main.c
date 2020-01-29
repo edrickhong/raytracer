@@ -13,6 +13,7 @@ pixel and blending.
  */
 
 #define _rays_per_pixel 4
+#define _bounce_depth 32
 
 typedef struct Sphere {
 	Vec3 pos;
@@ -105,6 +106,78 @@ u32 ColorToPixelColor(Color color) {
 			    (u32)(color.g * 255.0f), (u32)(color.b * 255.0f));
 }
 
+Vec3 ClampVec3(Vec3 vec) {
+	vec.x = _clampf(vec.x, 0.0f, 1.0f);
+	vec.y = _clampf(vec.y, 0.0f, 1.0f);
+	vec.z = _clampf(vec.z, 0.0f, 1.0f);
+
+	return vec;
+}
+
+Vec4 ClampVec4(Vec4 vec) {
+	vec.x = _clampf(vec.x, 0.0f, 1.0f);
+	vec.y = _clampf(vec.y, 0.0f, 1.0f);
+	vec.z = _clampf(vec.z, 0.0f, 1.0f);
+	vec.w = _clampf(vec.w, 0.0f, 1.0f);
+
+	return vec;
+}
+
+void ComputeBounceRays(Vec3 camerapos, Ray3 ray, Vec3* attenuation,u32 depth) {
+
+	if(depth > _bounce_depth){
+		return;
+	}
+
+	depth++;
+
+	u32 is_hit = 0;
+	Vec3 next_point = {0, 0, 2147483647.0f};
+	Vec3 next_normal = {0};
+
+	for (u32 i = 0; i < _arraycount(planes); i++) {
+		Point3 hitpoint = {0};
+		RPlane plane = planes[i];
+
+		if (IntersectOutLine3Plane(ray, plane.plane, &hitpoint)) {
+			Vec3 camera_to_hitpoint =
+			    NormalizeVec3(Vec3Sub(hitpoint, camerapos));
+			f32 dot = DotVec3(camera_to_hitpoint, ray.dir);
+
+			if (dot > 0.0f && hitpoint.z < next_point.z) {
+				is_hit = 1;
+				next_point = hitpoint;
+				next_normal = plane.plane.norm;
+			}
+		}
+	}
+
+	for (u32 i = 0; i < _arraycount(spheres); i++) {
+		RSphere sphere = spheres[i];
+		Point3 hitpoint = {0};
+
+		if (IntersectOutLine3Sphere(ray, sphere.sphere, &hitpoint)) {
+			if (hitpoint.z < next_point.z) {
+				is_hit = 1;
+				next_point = hitpoint;
+				next_normal =
+				    GetSphereNormalVe3(sphere.sphere, hitpoint);
+
+			}
+		}
+	}
+
+	if (is_hit) {
+		// This is the direct reflected light
+			Vec3 reflected =
+			    NormalizeVec3(ReflectVec3(ray.dir, next_normal));
+			Ray3 next_ray = {next_point,reflected};
+
+			ComputeBounceRays(camerapos, next_ray,attenuation,depth);
+			*attenuation = Vec3MulConstR(*attenuation,0.5f);
+	}
+}
+
 // we need to produce the bounces as well
 Color CastRay(Vec3 camerapos, Ray3 ray) {
 	u32 mat_index = 0;
@@ -154,20 +227,49 @@ Color CastRay(Vec3 camerapos, Ray3 ray) {
 		}
 	}
 
+	Color color = materials[mat_index].diffuse;
 	if (mat_index) {
+		Vec3 attenuation = {0};
+		// This is the direct reflected light
+		{
+			Vec3 refl_attenuation = {1, 1, 1};
 
-		Vec3 attenuation = {1,1,1};
+			Vec3 reflected =
+			    NormalizeVec3(ReflectVec3(ray.dir, next_normal));
+			Ray3 next_ray = {next_point,
+					 reflected};  // directly reflected ray
 
-		Vec3 reflected =
-		    NormalizeVec3(ReflectVec3(ray.dir, next_normal));
-		Ray3 next_ray = {next_point, reflected}; // directly reflected ray
+			ComputeBounceRays(camerapos, next_ray,
+					  &refl_attenuation,0);
+			attenuation = Vec3Add(attenuation, refl_attenuation);
+		}
 
-		CastRays(camerapos,next_ray);
+		for (u32 i = 0; i < _rays_per_pixel; i++) {
+			// this is the scattered light
 
-		// scattered rays
+			Vec3 scattered_attenuation = {1, 1, 1};
+
+			Vec3 scattered = {RandNegOneToOne(), RandNegOneToOne(),
+					  RandNegOneToOne()};
+
+			if (DotVec3(scattered,next_normal) < 0.0f) {
+				scattered =
+				    NormalizeVec3(ReflectVec3(scattered,next_normal));
+			}
+
+			Ray3 next_ray = {next_point, scattered};
+			ComputeBounceRays(camerapos, next_ray,
+					  &scattered_attenuation,0);
+			attenuation =
+			    Vec3Add(attenuation, scattered_attenuation);
+		}
+
+		attenuation = ClampVec3(attenuation);
+
+		color = CompMulVec4(color, Vec3ToVec4(attenuation));
 	}
 
-	return materials[mat_index].diffuse;
+	return color;
 }
 
 // maps a pixel to a 3d grid. the vector is at the top left of the pixel, not
@@ -242,7 +344,7 @@ s32 main(s32 argc, const s8** argv) {
 	WWindowContext window = WCreateWindow(
 	    "Raytracer",
 	    (WCreateFlags)(W_CREATE_NORESIZE | W_CREATE_BACKEND_XLIB), 0, 0,
-	    1280, 720);
+	    720, 480);
 
 	WBackBufferContext backbuffer = WCreateBackBuffer(&window);
 	WWindowEvent event = {0};
