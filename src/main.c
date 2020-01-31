@@ -54,7 +54,7 @@ f32 RandNegOneToOne() {
 	return value;
 }
 Vec3 ReflectVec3(Vec3 vec, Vec3 normal) {
-	return Vec3Add(vec, Vec3MulConstR(ProjectOntoVec3(vec, normal), 2.0f));
+	return Vec3Sub(vec, Vec3MulConstR(ProjectOntoVec3(vec, normal), 2.0f));
 }
 
 Vec3 GetSphereNormalVe3(Sphere sphere, Point3 point_on_sphere) {
@@ -71,11 +71,11 @@ Vec3 GetSphereNormalVe3(Sphere sphere, Point3 point_on_sphere) {
 b32 IntersectOutLine3Sphere(Line3 line, Sphere sphere, Point3* point) {
 	RSphere s = {.sphere = {.pos = {0}, 3}, .material_index = 2};
 
-	Vec3 sphere_to_ray = Vec3Sub(sphere.pos, line.pos);
+	Vec3 ray_to_sphere = Vec3Sub(sphere.pos, line.pos);
 
 	f32 a = DotVec3(line.dir, line.dir);
-	f32 b = -2.0f * DotVec3(line.dir, sphere_to_ray);
-	f32 c = DotVec3(sphere_to_ray, sphere_to_ray) -
+	f32 b = -2.0f * DotVec3(line.dir, ray_to_sphere);
+	f32 c = DotVec3(ray_to_sphere, ray_to_sphere) -
 		(sphere.radius * sphere.radius);
 	f32 discriminant = (b * b) - (4.0f * a * c);
 
@@ -86,6 +86,12 @@ b32 IntersectOutLine3Sphere(Line3 line, Sphere sphere, Point3* point) {
 	f32 root = sqrtf(discriminant);
 	f32 t0 = ((-1.0f * b) + root) / (2.0f * a);
 	f32 t1 = ((-1.0f * b) - root) / (2.0f * a);
+
+	// This is ray specific. TODO: don't treat rays as lines
+
+	if (t0 <= 0.0f && t1 <= 0.0f) {
+		return 0;
+	}
 
 	if (t0 < t1) {
 		*point = Vec3Add((Vec3MulConstR(line.dir, t0)), line.pos);
@@ -123,9 +129,8 @@ Vec4 ClampVec4(Vec4 vec) {
 	return vec;
 }
 
-void ComputeBounceRays(Vec3 camerapos, Ray3 ray, Vec3* attenuation,u32 depth) {
-
-	if(depth > _bounce_depth){
+void ComputeBounceRays(Ray3 ray, Vec3* attenuation, u32 depth) {
+	if (depth > _bounce_depth) {
 		return;
 	}
 
@@ -140,9 +145,9 @@ void ComputeBounceRays(Vec3 camerapos, Ray3 ray, Vec3* attenuation,u32 depth) {
 		RPlane plane = planes[i];
 
 		if (IntersectOutLine3Plane(ray, plane.plane, &hitpoint)) {
-			Vec3 camera_to_hitpoint =
-			    NormalizeVec3(Vec3Sub(hitpoint, camerapos));
-			f32 dot = DotVec3(camera_to_hitpoint, ray.dir);
+			Vec3 ray_to_hitpoint =
+			    NormalizeVec3(Vec3Sub(hitpoint, ray.pos));
+			f32 dot = DotVec3(ray_to_hitpoint, ray.dir);
 
 			if (dot > 0.0f && hitpoint.z < next_point.z) {
 				is_hit = 1;
@@ -156,30 +161,30 @@ void ComputeBounceRays(Vec3 camerapos, Ray3 ray, Vec3* attenuation,u32 depth) {
 		RSphere sphere = spheres[i];
 		Point3 hitpoint = {0};
 
+		// FIXME: the sphere is intersecting itself
 		if (IntersectOutLine3Sphere(ray, sphere.sphere, &hitpoint)) {
 			if (hitpoint.z < next_point.z) {
 				is_hit = 1;
 				next_point = hitpoint;
 				next_normal =
 				    GetSphereNormalVe3(sphere.sphere, hitpoint);
-
 			}
 		}
 	}
 
 	if (is_hit) {
 		// This is the direct reflected light
-			Vec3 reflected =
-			    NormalizeVec3(ReflectVec3(ray.dir, next_normal));
-			Ray3 next_ray = {next_point,reflected};
+		Vec3 reflected =
+		    NormalizeVec3(ReflectVec3(ray.dir, next_normal));
+		Ray3 next_ray = {next_point, reflected};
 
-			ComputeBounceRays(camerapos, next_ray,attenuation,depth);
-			*attenuation = Vec3MulConstR(*attenuation,0.5f);
+		ComputeBounceRays(next_ray, attenuation, depth);
+		*attenuation = Vec3MulConstR(*attenuation, 0.5f);
 	}
 }
 
 // we need to produce the bounces as well
-Color CastRay(Vec3 camerapos, Ray3 ray) {
+Color CastRay(Ray3 ray) {
 	u32 mat_index = 0;
 	Vec3 next_point = {0, 0, 2147483647.0f};
 	Vec3 next_normal = {0};
@@ -189,9 +194,9 @@ Color CastRay(Vec3 camerapos, Ray3 ray) {
 		RPlane plane = planes[i];
 
 		if (IntersectOutLine3Plane(ray, plane.plane, &hitpoint)) {
-			Vec3 camera_to_hitpoint =
-			    NormalizeVec3(Vec3Sub(hitpoint, camerapos));
-			f32 dot = DotVec3(camera_to_hitpoint, ray.dir);
+			Vec3 ray_to_hitpoint =
+			    NormalizeVec3(Vec3Sub(hitpoint, ray.pos));
+			f32 dot = DotVec3(ray_to_hitpoint, ray.dir);
 
 			if (dot > 0.0f && hitpoint.z < next_point.z) {
 				mat_index = plane.material_index;
@@ -229,6 +234,7 @@ Color CastRay(Vec3 camerapos, Ray3 ray) {
 
 	Color color = materials[mat_index].diffuse;
 	if (mat_index) {
+		//if (mat_index == 2) _breakpoint();
 		Vec3 attenuation = {0};
 		// This is the direct reflected light
 		{
@@ -239,8 +245,7 @@ Color CastRay(Vec3 camerapos, Ray3 ray) {
 			Ray3 next_ray = {next_point,
 					 reflected};  // directly reflected ray
 
-			ComputeBounceRays(camerapos, next_ray,
-					  &refl_attenuation,0);
+			ComputeBounceRays(next_ray, &refl_attenuation, 0);
 			attenuation = Vec3Add(attenuation, refl_attenuation);
 		}
 
@@ -252,14 +257,13 @@ Color CastRay(Vec3 camerapos, Ray3 ray) {
 			Vec3 scattered = {RandNegOneToOne(), RandNegOneToOne(),
 					  RandNegOneToOne()};
 
-			if (DotVec3(scattered,next_normal) < 0.0f) {
-				scattered =
-				    NormalizeVec3(ReflectVec3(scattered,next_normal));
+			if (DotVec3(scattered, next_normal) < 0.0f) {
+				scattered = NormalizeVec3(
+				    ReflectVec3(scattered, next_normal));
 			}
 
 			Ray3 next_ray = {next_point, scattered};
-			ComputeBounceRays(camerapos, next_ray,
-					  &scattered_attenuation,0);
+			ComputeBounceRays(next_ray, &scattered_attenuation, 0);
 			attenuation =
 			    Vec3Add(attenuation, scattered_attenuation);
 		}
@@ -329,7 +333,7 @@ void CastRays(WBackBufferContext* buffer, Vec3 camerapos, f32 z) {
 				Vec3 dir =
 				    NormalizeVec3(Vec3Sub(gridpos, camerapos));
 				Ray3 ray = {camerapos, dir};
-				color = Vec4Add(color, CastRay(camerapos, ray));
+				color = Vec4Add(color, CastRay(ray));
 			}
 
 			color = Vec4DivConstR(color, (f32)_rays_per_pixel);
