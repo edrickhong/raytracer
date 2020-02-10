@@ -22,8 +22,7 @@ typedef struct Sphere {
 
 typedef struct RMaterial {
 	Color diffuse;
-	f32 emittance;
-	f32 scatter;
+	f32 scatter;  // 0 reflective, 1 is rough
 } RMaterial;
 
 typedef struct RSphere {
@@ -37,12 +36,13 @@ typedef struct RPlane {
 } RPlane;
 
 _global RMaterial materials[] = {
-    {0, 0, 1, 1}, {1, 0, 0, 1}, {0, 1, 0, 1}, {1, 1, 0, 1}, {0, 1, 1, 1},
+    {0, 0, 1, 1},      {1, 0, 0, 1, 1}, {0, 1, 0, 1, 0.8},
+    {1, 1, 0, 1, 0.2}, {0, 1, 1, 1, 1},
 };
 _global RSphere spheres[] = {
     {.sphere = {{0, 0, 10}, 3}, .material_index = 2},
-    {.sphere = {{-15, 5, 20}, 5}, .material_index = 3},
-    {.sphere = {{20, 8, 30}, 7}, .material_index = 4},
+    //{.sphere = {{-15, 5, 20}, 5}, .material_index = 3},
+    //{.sphere = {{20, 8, 30}, 7}, .material_index = 4},
 };
 _global RPlane planes[] = {
     {.plane = {{0, -1, 0}, {0, 1, 0}}, .material_index = 1},
@@ -161,7 +161,6 @@ void ComputeBounceRays(Ray3 ray, Vec3* attenuation, u32 depth) {
 		RSphere sphere = spheres[i];
 		Point3 hitpoint = {0};
 
-		// FIXME: the sphere is intersecting itself
 		if (IntersectOutLine3Sphere(ray, sphere.sphere, &hitpoint)) {
 			if (hitpoint.z < next_point.z) {
 				is_hit = 1;
@@ -179,7 +178,9 @@ void ComputeBounceRays(Ray3 ray, Vec3* attenuation, u32 depth) {
 		Ray3 next_ray = {next_point, reflected};
 
 		ComputeBounceRays(next_ray, attenuation, depth);
-		*attenuation = Vec3MulConstR(*attenuation, 0.5f);
+
+		f32 dot = DotVec3(ray.dir, next_normal);
+		*attenuation = Vec3MulConstR(*attenuation, dot);
 	}
 }
 
@@ -234,8 +235,10 @@ Color CastRay(Ray3 ray) {
 
 	Color color = materials[mat_index].diffuse;
 	if (mat_index) {
-		//if (mat_index == 2) _breakpoint();
+
 		Vec3 attenuation = {0};
+
+#if 1
 		// This is the direct reflected light
 		{
 			Vec3 refl_attenuation = {1, 1, 1};
@@ -246,8 +249,19 @@ Color CastRay(Ray3 ray) {
 					 reflected};  // directly reflected ray
 
 			ComputeBounceRays(next_ray, &refl_attenuation, 0);
+
+			f32 reflective =
+			    1.0f - materials[mat_index].scatter;
+
+			refl_attenuation =
+			    Vec3MulConstR(refl_attenuation, reflective);
+
 			attenuation = Vec3Add(attenuation, refl_attenuation);
 		}
+
+#endif
+
+#if 1
 
 		for (u32 i = 0; i < _rays_per_pixel; i++) {
 			// this is the scattered light
@@ -264,9 +278,14 @@ Color CastRay(Ray3 ray) {
 
 			Ray3 next_ray = {next_point, scattered};
 			ComputeBounceRays(next_ray, &scattered_attenuation, 0);
+			f32 scatter = materials[mat_index].scatter;
+			scattered_attenuation =
+			    Vec3MulConstR(scattered_attenuation, scatter);
 			attenuation =
 			    Vec3Add(attenuation, scattered_attenuation);
 		}
+
+#endif
 
 		attenuation = ClampVec3(attenuation);
 
