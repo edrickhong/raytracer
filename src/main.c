@@ -11,20 +11,49 @@
 #define _minf32 0xFF7FFFFF
 
 // This is our world
-_global RMaterial materials[5] = {0};
+_global RMaterial materials[6] = {0};
 _global RPlane planes[] = {
     {{{0}, {0, 1, 0}}, 1},
 };
 
 _global RSphere spheres[] = {
     {{{0}, 1.0f}, 2},
-    {{{3,0,2}, 1.0f}, 3},
-    {{{-2,2,1}, 1.0f}, 4},
+    {{{3, 0, 2}, 1.0f}, 3},
+    {{{-2, 2, 1}, 1.0f}, 4},
+    {{{1, 3, 1}, 1.0f}, 5},
 };
+
+Vec3 GetRayOffset(u32 x, u32 y, Vec3 camera_x, Vec3 camera_y,
+		  Vec2 half_grid_dim, WBackBufferContext buffer) {
+	f32 half_grid_w = half_grid_dim.x;
+	f32 half_grid_h = half_grid_dim.y;
+
+	f32 grid_y = ((f32)y) / (f32)(buffer.height) * -2.0f + 1.0f;
+	f32 grid_x = ((f32)x) / (f32)(buffer.width) * 2.0f - 1.0f;
+	Vec3 offset_x = Vec3MulConstR(camera_x, grid_x * half_grid_w);
+	Vec3 offset_y = Vec3MulConstR(camera_y, grid_y * half_grid_h);
+
+	return Vec3Add(offset_x, offset_y);
+}
+
+Vec3 GetJitterOffset(Vec3 camera_x, Vec3 camera_y, Vec2 half_grid_dim,
+		     WBackBufferContext buffer) {
+	Vec3 start =
+	    GetRayOffset(0, 0, camera_x, camera_y, half_grid_dim, buffer);
+	Vec3 end =
+	    GetRayOffset(1, 1, camera_x, camera_y, half_grid_dim, buffer);
+
+	Vec3 diff = Vec3MulConstR(Vec3Sub(end, start),0.5f);
+
+	diff.x *= RandNegOneToOne();
+	diff.y *= RandNegOneToOne();
+	diff.z *= RandNegOneToOne();
+
+	return diff;
+}
 
 #define _bounce_count 8
 #define _rays_per_pixel 16
-
 
 Color3 CastRay(Ray3 ray) {
 	Color3 out_color = {0};
@@ -58,7 +87,6 @@ Color3 CastRay(Ray3 ray) {
 					next_point = hit_point;
 					hit_material = rplane.material_index;
 					cur_t = t;
-
 				}
 			}
 		}
@@ -91,11 +119,11 @@ Color3 CastRay(Ray3 ray) {
 			f32 dot =
 			    DotVec3(Vec3MulConstR(ray.dir, -1.0f), next_normal);
 
-			if(dot < 0.0f){
+			if (dot < 0.0f) {
 				dot = 0.0f;
 			}
 
-#if 0
+#if 1
 			Color3 refl_color = Vec3MulConstR(material.refl, dot);
 #else
 			Color3 refl_color = material.refl;
@@ -123,16 +151,15 @@ Color3 CastRay(Ray3 ray) {
 
 #if _debug_plane
 
-			if(r == 0 && hit_material == 1){
+			if (r == 0 && hit_material == 1) {
 				plane_hit = true;
 			}
 
-			if(plane_hit && r == 1){
+			if (plane_hit && r == 1) {
+				printf("PLANE HIT %d\n", hit_material);
 
-				printf("PLANE HIT %d\n",hit_material);
-
-				if(hit_material == 4){
-					Color3 new_color = {1,1,0};
+				if (hit_material == 4) {
+					Color3 new_color = {1, 1, 0};
 					return new_color;
 				}
 			}
@@ -151,34 +178,39 @@ Color3 CastRay(Ray3 ray) {
 
 void MainRayCast(WBackBufferContext buffer) {
 	// this setups up the materials
-	
+
 	// Sky material
 	materials[0].emit.x = 0.3f;
 	materials[0].emit.y = 0.4f;
 	materials[0].emit.z = 0.5f;
 	materials[0].scatter = 0;
 
-	//plane material
+	// plane material
 	materials[1].refl.x = 0.5;
 	materials[1].refl.y = 0.5f;
 	materials[1].refl.z = 0.5f;
 	materials[1].scatter = 0;
 
-	//sphere material
+	// sphere material
 	materials[2].refl.x = 0.7;
 	materials[2].refl.y = 0.5f;
 	materials[2].refl.z = 0.3f;
 	materials[2].scatter = 0;
 
-	materials[3].refl.x = 0.9;
-	materials[3].refl.y = 0.0f;
-	materials[3].refl.z = 0.0f;
+	materials[3].emit.x = 4.0;
+	materials[3].emit.y = 0.0f;
+	materials[3].emit.z = 0.0f;
 	materials[3].scatter = 0;
 
 	materials[4].refl.x = 0.2;
 	materials[4].refl.y = 0.8f;
 	materials[4].refl.z = 0.2f;
 	materials[4].scatter = 0.7f;
+
+	materials[5].refl.x = 0.4;
+	materials[5].refl.y = 0.8f;
+	materials[5].refl.z = 0.9f;
+	materials[5].scatter = 0.85f;
 
 	Vec3 world_y = {0, 1, 0};
 
@@ -203,28 +235,28 @@ void MainRayCast(WBackBufferContext buffer) {
 	f32 half_grid_w = grid_w * 0.5f;
 	f32 half_grid_h = grid_h * 0.5f;
 
+	Vec2 half_grid_dim = {half_grid_w, half_grid_h};
+
 	Vec3 grid_center = Vec3MulConstR(camera_z, grid_dist);
 
 	for (u32 y = 0; y < buffer.height; y++) {
 		for (u32 x = 0; x < buffer.width; x++) {
-			f32 grid_y =
-			    ((f32)y) / (f32)(buffer.height) * -2.0f + 1.0f;
-			f32 grid_x =
-			    ((f32)x) / (f32)(buffer.width) * 2.0f - 1.0f;
-
-			Vec3 offset_x =
-			    Vec3MulConstR(camera_x, grid_x * half_grid_w);
-			Vec3 offset_y =
-			    Vec3MulConstR(camera_y, grid_y * half_grid_h);
-
-			Vec3 ray_dir = NormalizeVec3(
-			    Vec3Add(grid_center, Vec3Add(offset_x, offset_y)));
-
-			Ray3 ray = {camerapos, ray_dir};
+			Vec3 main_offset = GetRayOffset(
+			    x, y, camera_x, camera_y, half_grid_dim, buffer);
 
 			Color3 color = {0};
 
 			for (u32 i = 0; i < _rays_per_pixel; i++) {
+				Vec3 jitter_offset = GetJitterOffset(
+				    camera_x, camera_y, half_grid_dim, buffer);
+
+				Vec3 final_offset =
+				    Vec3Add(main_offset, jitter_offset);
+
+				Vec3 ray_dir = NormalizeVec3(
+				    Vec3Add(grid_center, final_offset));
+
+				Ray3 ray = {camerapos, ray_dir};
 				color = Vec3Add(color, CastRay(ray));
 			}
 
@@ -234,7 +266,7 @@ void MainRayCast(WBackBufferContext buffer) {
 			u32* pixel = buffer.pixels + (y * buffer.width) + x;
 			*pixel = ColorToPixelColor(color);
 		}
-#define _enable_status 0
+#define _enable_status 1
 
 		// status
 #if _enable_status
