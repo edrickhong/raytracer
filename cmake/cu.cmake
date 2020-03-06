@@ -13,19 +13,13 @@ if(UNIX)
 
   if(DEBUG)
 
-    if(BUILD_STEP)
-
-      set(CMAKE_C_COMPILER /usr/bin/clang)
-      set(CMAKE_CXX_COMPILER /usr/bin/clang++)
-
-    endif()
-
     # set(CLANG_DEBUG "-fsanitize=address,memory,undefined,safe-stack,thread")
     set(CLANG_DEBUG "") # break here __asan::ReportGenericError
+    #-Wabsolute-value 
 
     set(
       STRICT_FLAGS
-      "-Werror -Wall -Wextra -pedantic -Wcast-align  -Wctor-dtor-privacy -Wdisabled-optimization -Wformat=2 -Winit-self  -Wmissing-include-dirs   -Woverloaded-virtual -Wredundant-decls -Wshadow -Wsign-promo  -Wstrict-overflow=5 -Wundef -Wno-unused -Wno-variadic-macros -Wno-parentheses -Wunused-function -Wunused-label -Wunused-value -Wunused-variable -fdiagnostics-show-option -Wno-missing-field-initializers -Wno-missing-braces -Wimplicit-fallthrough -Wdouble-promotion -Wnull-dereference -Wswitch -Wuninitialized -Wunknown-pragmas -Warray-bounds -Wtautological-compare -Wfloat-equal -Wabsolute-value -Wdangling-else -Waddress -Wpacked -Wvla -Wstack-protector"
+      "-Werror -Wall -Wextra -pedantic -Wcast-align  -Wctor-dtor-privacy -Wdisabled-optimization -Wformat=2 -Winit-self  -Wmissing-include-dirs   -Woverloaded-virtual -Wredundant-decls -Wshadow -Wsign-promo  -Wstrict-overflow=5 -Wundef -Wno-unused -Wno-variadic-macros -Wno-parentheses -Wunused-function -Wunused-label -Wunused-value -Wunused-variable -fdiagnostics-show-option -Wno-missing-field-initializers -Wno-missing-braces -Wimplicit-fallthrough -Wdouble-promotion -Wnull-dereference -Wswitch -Wuninitialized -Wunknown-pragmas -Warray-bounds -Wtautological-compare -Wfloat-equal -Wdangling-else -Waddress -Wpacked -Wvla -Wstack-protector"
       )
 
   else()

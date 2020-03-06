@@ -1,6 +1,5 @@
 #include "main.h"
 /*
- * We are rewrting this
  * Make rays actual rays instead of lines
  * make plane use a norm + a t value instead of a norm + pos
  * TODO: so far so good but the green sphere isn't casting a shadow
@@ -30,10 +29,10 @@ Vec3 GetRayOffset(u32 x, u32 y, Vec3 camera_x, Vec3 camera_y,
 
 	f32 grid_y = ((f32)y) / (f32)(buffer.height) * -2.0f + 1.0f;
 	f32 grid_x = ((f32)x) / (f32)(buffer.width) * 2.0f - 1.0f;
-	Vec3 offset_x = Vec3MulConstR(camera_x, grid_x * half_grid_w);
-	Vec3 offset_y = Vec3MulConstR(camera_y, grid_y * half_grid_h);
+	Vec3 offset_x = MulConstRVec3(camera_x, grid_x * half_grid_w);
+	Vec3 offset_y = MulConstRVec3(camera_y, grid_y * half_grid_h);
 
-	return Vec3Add(offset_x, offset_y);
+	return AddVec3(offset_x, offset_y);
 }
 
 Vec3 GetJitterOffset(Vec3 camera_x, Vec3 camera_y, Vec2 half_grid_dim,
@@ -43,7 +42,7 @@ Vec3 GetJitterOffset(Vec3 camera_x, Vec3 camera_y, Vec2 half_grid_dim,
 	Vec3 end =
 	    GetRayOffset(1, 1, camera_x, camera_y, half_grid_dim, buffer);
 
-	Vec3 diff = Vec3MulConstR(Vec3Sub(end, start),0.5f);
+	Vec3 diff = MulConstRVec3(SubVec3(end, start), 0.5f);
 
 	diff.x *= RandNegOneToOne();
 	diff.y *= RandNegOneToOne();
@@ -52,8 +51,8 @@ Vec3 GetJitterOffset(Vec3 camera_x, Vec3 camera_y, Vec2 half_grid_dim,
 	return diff;
 }
 
-#define _bounce_count 8
-#define _rays_per_pixel 16
+#define _bounce_count 16
+#define _rays_per_pixel 32
 
 Color3 CastRay(Ray3 ray) {
 	Color3 out_color = {0};
@@ -77,12 +76,12 @@ Color3 CastRay(Ray3 ray) {
 
 			Vec3 hit_point = {0};
 
-			if (IntersectOutLine3Plane(ray, rplane.plane,
+			if (IntersectOutRay3Plane(ray, rplane.plane,
 						   &hit_point)) {
-				Vec3 hit_to_ray = Vec3Sub(hit_point, ray.pos);
+				Vec3 hit_to_ray = SubVec3(hit_point, ray.pos);
 				f32 t = DotVec3(hit_to_ray, ray.dir);
 
-				if (t > 0 && t < cur_t) {
+				if (t < cur_t) {
 					next_normal = rplane.plane.norm;
 					next_point = hit_point;
 					hit_material = rplane.material_index;
@@ -96,13 +95,13 @@ Color3 CastRay(Ray3 ray) {
 
 			Vec3 hit_point = {0};
 
-			if (IntersectOutLine3Sphere(ray, rsphere.sphere,
+			if (IntersectClosestOutRay3Sphere(ray, rsphere.sphere,
 						    &hit_point)) {
-				Vec3 hit_to_ray = Vec3Sub(hit_point, ray.pos);
+				Vec3 hit_to_ray = SubVec3(hit_point, ray.pos);
 				f32 t = DotVec3(hit_to_ray, ray.dir);
 
 				if (t < cur_t) {
-					next_normal = GetSphereNormalVe3(
+					next_normal = GetSphereNormalVec3(
 					    rsphere.sphere, hit_point);
 					next_point = hit_point;
 					hit_material = rsphere.material_index;
@@ -114,22 +113,22 @@ Color3 CastRay(Ray3 ray) {
 		RMaterial material = materials[hit_material];
 		// if we actually hit something
 		if (hit_material) {
-			out_color = Vec3Add(out_color,
-					    CompMulVec3(atten, material.emit));
+			out_color = AddVec3(out_color,
+					    SchurVec3(atten, material.emit));
 			f32 dot =
-			    DotVec3(Vec3MulConstR(ray.dir, -1.0f), next_normal);
+			    DotVec3(MulConstRVec3(ray.dir, -1.0f), next_normal);
 
 			if (dot < 0.0f) {
 				dot = 0.0f;
 			}
 
 #if 1
-			Color3 refl_color = Vec3MulConstR(material.refl, dot);
+			Color3 refl_color = MulConstRVec3(material.refl, dot);
 #else
 			Color3 refl_color = material.refl;
 #endif
 
-			atten = CompMulVec3(atten, refl_color);
+			atten = SchurVec3(atten, refl_color);
 
 			// NOTE: this is the direct bounce ray
 			Vec3 bounce_ray =
@@ -167,8 +166,8 @@ Color3 CastRay(Ray3 ray) {
 		}
 
 		else {
-			out_color = Vec3Add(out_color,
-					    CompMulVec3(atten, material.emit));
+			out_color = AddVec3(out_color,
+					    SchurVec3(atten, material.emit));
 			break;
 		}
 	}
@@ -216,7 +215,7 @@ void MainRayCast(WBackBufferContext buffer) {
 
 	Vec3 camerapos = {0, 1.0f, -10.0f};
 
-	Vec3 camera_z = NormalizeVec3(Vec3MulConstR(camerapos, -1.0f));
+	Vec3 camera_z = NormalizeVec3(MulConstRVec3(camerapos, -1.0f));
 	Vec3 camera_x = NormalizeVec3(CrossVec3(world_y, camera_z));
 	Vec3 camera_y = NormalizeVec3(CrossVec3(camera_z, camera_x));
 
@@ -237,7 +236,7 @@ void MainRayCast(WBackBufferContext buffer) {
 
 	Vec2 half_grid_dim = {half_grid_w, half_grid_h};
 
-	Vec3 grid_center = Vec3MulConstR(camera_z, grid_dist);
+	Vec3 grid_center = MulConstRVec3(camera_z, grid_dist);
 
 	for (u32 y = 0; y < buffer.height; y++) {
 		for (u32 x = 0; x < buffer.width; x++) {
@@ -251,17 +250,17 @@ void MainRayCast(WBackBufferContext buffer) {
 				    camera_x, camera_y, half_grid_dim, buffer);
 
 				Vec3 final_offset =
-				    Vec3Add(main_offset, jitter_offset);
+				    AddVec3(main_offset, jitter_offset);
 
 				Vec3 ray_dir = NormalizeVec3(
-				    Vec3Add(grid_center, final_offset));
+				    AddVec3(grid_center, final_offset));
 
 				Ray3 ray = {camerapos, ray_dir};
-				color = Vec3Add(color, CastRay(ray));
+				color = AddVec3(color, CastRay(ray));
 			}
 
 			color =
-			    Vec3MulConstR(color, 1.0f / (f32)_rays_per_pixel);
+			    MulConstRVec3(color, 1.0f / (f32)_rays_per_pixel);
 
 			u32* pixel = buffer.pixels + (y * buffer.width) + x;
 			*pixel = ColorToPixelColor(color);
@@ -289,6 +288,23 @@ void MainRayCast(WBackBufferContext buffer) {
 #endif
 }
 
+#define _enable_threading 0
+
+#if _enable_threading
+
+#include "tthreadx.h"
+_global volatile ThreadWorkQueue work_que = {};
+
+void ThreadProc(void* args) {
+	TSemaphore sem = *(TSemaphore*)args;
+	for (;;) {
+		TWaitSemaphore(sem);
+		while (ExecuteThreadWorkQueue()) {
+		}
+	}
+}
+#endif
+
 s32 main(s32 argc, const s8** argv) {
 	WWindowContext window = WCreateWindow(
 	    "Raytracer",
@@ -298,9 +314,17 @@ s32 main(s32 argc, const s8** argv) {
 	WBackBufferContext backbuffer = WCreateBackBuffer(&window);
 	WWindowEvent event = {0};
 
-	b32 run = 1;
+	b32 run = true;
 
-	Vec3 camerapos = {0};
+#if _enable_threading
+
+	TSemaphore sem = TCreateSemaphore(0);
+
+	for (u32 i = 0; i < SGetTotalThreads(); i++) {
+		TCreateThread(ThreadProc, _kilobytes(22),&sem);
+	}
+
+#endif
 
 	MainRayCast(backbuffer);
 
