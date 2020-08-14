@@ -6,6 +6,7 @@
 #include "string.h"
 #include "ttype.h"
 #include "wwindow.h"
+#include "ttimer.h"
 
 
 typedef struct RMaterial {

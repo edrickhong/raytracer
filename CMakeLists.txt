@@ -10,11 +10,11 @@ if(UNIX)
 	initsubmodules()
 
 	cmake_minimum_required(VERSION 3.9)
-	project(copper)
+	project(tembot)
 
 	if(DEBUG)
 		# -mavx 
-		set(OPT_FLAGS "-g -O2 -fno-omit-frame-pointer -fstack-protector-strong")
+		set(OPT_FLAGS "-g -O0 -fno-omit-frame-pointer -fstack-protector-strong")
 
 	endif()
 
@@ -49,7 +49,7 @@ if(UNIX)
 else(UNIX)
 
 	cmake_minimum_required(VERSION 3.9)
-	project(copper)
+	project(tembot)
 
 	# sets internal libs paths and flags
 	include(${CMAKE_SOURCE_DIR}/cmake/cu.cmake)

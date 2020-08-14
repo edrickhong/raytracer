@@ -6,13 +6,16 @@
  * pretty sure this is a bug
  */
 
-#define _maxf32 0x7F7FFFFF
+#define _test_windowing 0
+
+
+//NOTE: this looks very off
 #define _minf32 0xFF7FFFFF
 
 // This is our world
 _global RMaterial materials[6] = {0};
 _global RPlane planes[] = {
-    {{{0}, {0, 1, 0}}, 1},
+    {{.norm = {0,1,0}, .d = 0.0f}, 1},
 };
 
 _global RSphere spheres[] = {
@@ -64,7 +67,7 @@ Color3 CastRay(Ray3 ray) {
 	b32 plane_hit = false;
 #endif
 
-	f32 cur_t = _maxf32;
+	 f32 cur_t = _maxf32;
 
 	for (u32 r = 0; r < _bounce_count; r++) {
 		u32 hit_material = 0;
@@ -77,7 +80,7 @@ Color3 CastRay(Ray3 ray) {
 			Vec3 hit_point = {0};
 
 			if (IntersectOutRay3Plane(ray, rplane.plane,
-						   &hit_point)) {
+						  &hit_point)) {
 				Vec3 hit_to_ray = SubVec3(hit_point, ray.pos);
 				f32 t = DotVec3(hit_to_ray, ray.dir);
 
@@ -96,7 +99,7 @@ Color3 CastRay(Ray3 ray) {
 			Vec3 hit_point = {0};
 
 			if (IntersectClosestOutRay3Sphere(ray, rsphere.sphere,
-						    &hit_point)) {
+							  &hit_point)) {
 				Vec3 hit_to_ray = SubVec3(hit_point, ray.pos);
 				f32 t = DotVec3(hit_to_ray, ray.dir);
 
@@ -113,8 +116,8 @@ Color3 CastRay(Ray3 ray) {
 		RMaterial material = materials[hit_material];
 		// if we actually hit something
 		if (hit_material) {
-			out_color = AddVec3(out_color,
-					    SchurVec3(atten, material.emit));
+			out_color =
+			    AddVec3(out_color, SchurVec3(atten, material.emit));
 			f32 dot =
 			    DotVec3(MulConstRVec3(ray.dir, -1.0f), next_normal);
 
@@ -142,7 +145,7 @@ Color3 CastRay(Ray3 ray) {
 				    ReflectVec3(scatter_ray, next_normal);
 			}
 
-			Vec3 next_dir = InterpolateVec3(scatter_ray, bounce_ray,
+			Vec3 next_dir = LerpVec3(scatter_ray, bounce_ray,
 							material.scatter);
 
 			ray.dir = NormalizeVec3(next_dir);
@@ -166,8 +169,8 @@ Color3 CastRay(Ray3 ray) {
 		}
 
 		else {
-			out_color = AddVec3(out_color,
-					    SchurVec3(atten, material.emit));
+			out_color =
+			    AddVec3(out_color, SchurVec3(atten, material.emit));
 			break;
 		}
 	}
@@ -305,11 +308,45 @@ void ThreadProc(void* args) {
 }
 #endif
 
+#include "ccontroller.h"
+
 s32 main(s32 argc, const s8** argv) {
-	WWindowContext window = WCreateWindow(
-	    "Raytracer",
-	    (WCreateFlags)(W_CREATE_NORESIZE | W_CREATE_BACKEND_XLIB), 0, 0,
-	    1080, 720);
+
+#if 1
+	CInitControllers();
+	return 0;
+#endif
+
+	WPlatform array[2] = {0};
+	u32 count = 0;
+
+	WGetPlatforms(array,&count,false);
+
+	WPlatform platform = WPLATFORM_NONE;
+
+	for(u32 i = 0; i < count; i++){
+		WPlatform p = array[i];
+		if(p == WPLATFORM_WAYLAND){
+			platform = p;
+			break;
+		}
+	}
+
+	if(platform == WPLATFORM_NONE){
+		platform = array[0];
+	}
+
+	WCreateWindowConnection(platform);
+
+
+	WCreateFlags flags = 0;
+
+#if !(_test_windowing)
+	flags |= W_CREATE_NORESIZE;
+#endif
+
+	WWindowContext window =
+	    WCreateWindow("Raytracer", flags, 0, 0, 1080, 720);
 
 	WBackBufferContext backbuffer = WCreateBackBuffer(&window);
 	WWindowEvent event = {0};
@@ -321,22 +358,64 @@ s32 main(s32 argc, const s8** argv) {
 	TSemaphore sem = TCreateSemaphore(0);
 
 	for (u32 i = 0; i < SGetTotalThreads(); i++) {
-		TCreateThread(ThreadProc, _kilobytes(22),&sem);
+		TCreateThread(ThreadProc, _kilobytes(22), &sem);
 	}
 
 #endif
 
+#if !(_test_windowing)
 	MainRayCast(backbuffer);
+#endif
 
 	while (run) {
-		WPresentBackBuffer(&window, &backbuffer);
+#if _test_windowing
+		TimeSpec start = {0};
+		GetTime(&start);
+#endif
 
-		while (WWaitForWindowEvent(&window, &event)) {
+		// TODO: In wayland, we should request a throttle
+		// wl_surface::frame - request a frame throttling hint
+		SleepMS(16.0f);
+
+		while (WWaitForWindowEvent(&event)) {
 			if (event.type == W_EVENT_KBEVENT_KEYDOWN ||
 			    event.type == W_EVENT_CLOSE) {
 				run = 0;
 			}
+
+			if (event.type == W_EVENT_RESIZE) {
+				WAckResizeEvent(&event);
+
+				WDestroyBackBuffer(&backbuffer);
+				backbuffer = WCreateBackBuffer(&window);
+
+			}
+
+			WRetireEvent(&event);
 		}
+
+#if _test_windowing
+
+		// TODO: snap resizes are not working
+		// profile
+		// I doubt it is the fill
+		u32 total_pixels = backbuffer.width * backbuffer.height;
+		for (u32 i = 0; i < total_pixels; i++) {
+			backbuffer.pixels[i] = _encode_argb(255, 0, 0, 255);
+		}
+#endif
+		WPresentBackBuffer(&window, &backbuffer);
+
+#if _test_windowing
+		TimeSpec end = {0};
+		GetTime(&end);
+
+		f32 diff = GetTimeDifferenceMS(start, end);
+
+		if (diff > 17.0f) {
+		//	printf("-----------\nTIME %f\n", (f64)diff);
+		}
+#endif
 	}
 
 	return 0;
