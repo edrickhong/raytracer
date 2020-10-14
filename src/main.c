@@ -1,4 +1,6 @@
 #include "main.h"
+
+
 /*
  * Make rays actual rays instead of lines
  * make plane use a norm + a t value instead of a norm + pos
@@ -8,14 +10,13 @@
 
 #define _test_windowing 0
 
-
-//NOTE: this looks very off
+// NOTE: this looks very off
 #define _minf32 0xFF7FFFFF
 
 // This is our world
 _global RMaterial materials[6] = {0};
 _global RPlane planes[] = {
-    {{.norm = {0,1,0}, .d = 0.0f}, 1},
+    {{.norm = {0, 1, 0}, .d = 0.0f}, 1},
 };
 
 _global RSphere spheres[] = {
@@ -67,7 +68,7 @@ Color3 CastRay(Ray3 ray) {
 	b32 plane_hit = false;
 #endif
 
-	 f32 cur_t = _maxf32;
+	f32 cur_t = (f32)_maxf32;
 
 	for (u32 r = 0; r < _bounce_count; r++) {
 		u32 hit_material = 0;
@@ -145,8 +146,8 @@ Color3 CastRay(Ray3 ray) {
 				    ReflectVec3(scatter_ray, next_normal);
 			}
 
-			Vec3 next_dir = LerpVec3(scatter_ray, bounce_ray,
-							material.scatter);
+			Vec3 next_dir =
+			    LerpVec3(scatter_ray, bounce_ray, material.scatter);
 
 			ray.dir = NormalizeVec3(next_dir);
 			ray.pos = next_point;
@@ -194,7 +195,7 @@ void MainRayCast(WBackBufferContext buffer) {
 	materials[1].scatter = 0;
 
 	// sphere material
-	materials[2].refl.x = 0.7;
+	materials[2].refl.x = 0.7f;
 	materials[2].refl.y = 0.5f;
 	materials[2].refl.z = 0.3f;
 	materials[2].scatter = 0;
@@ -204,12 +205,12 @@ void MainRayCast(WBackBufferContext buffer) {
 	materials[3].emit.z = 0.0f;
 	materials[3].scatter = 0;
 
-	materials[4].refl.x = 0.2;
+	materials[4].refl.x = 0.2f;
 	materials[4].refl.y = 0.8f;
 	materials[4].refl.z = 0.2f;
 	materials[4].scatter = 0.7f;
 
-	materials[5].refl.x = 0.4;
+	materials[5].refl.x = 0.4f;
 	materials[5].refl.y = 0.8f;
 	materials[5].refl.z = 0.9f;
 	materials[5].scatter = 0.85f;
@@ -308,11 +309,30 @@ void ThreadProc(void* args) {
 }
 #endif
 
+#if 0
 #include "ccontroller.h"
+#endif
 
 s32 main(s32 argc, const s8** argv) {
 
-#if 1
+	//NOTE: testing NMAKE defines
+#if 0
+
+	//TODO: in NMAKE, __WIN32 is not defined
+
+#ifdef __WIN32
+	printf("DEFINED!\n");
+#endif
+
+#ifndef __WIN32
+	printf("NOT DEFINED\n");
+	return 0;
+#endif
+
+#endif
+
+
+#if 0
 	CInitControllers();
 	return 0;
 #endif
@@ -320,24 +340,23 @@ s32 main(s32 argc, const s8** argv) {
 	WPlatform array[2] = {0};
 	u32 count = 0;
 
-	WGetPlatforms(array,&count,false);
+	WGetPlatforms(array, &count, false);
 
 	WPlatform platform = WPLATFORM_NONE;
 
-	for(u32 i = 0; i < count; i++){
+	for (u32 i = 0; i < count; i++) {
 		WPlatform p = array[i];
-		if(p == WPLATFORM_WAYLAND){
+		if (p == WPLATFORM_WAYLAND) {
 			platform = p;
 			break;
 		}
 	}
 
-	if(platform == WPLATFORM_NONE){
+	if (platform == WPLATFORM_NONE) {
 		platform = array[0];
 	}
 
 	WCreateWindowConnection(platform);
-
 
 	WCreateFlags flags = 0;
 
@@ -362,7 +381,7 @@ s32 main(s32 argc, const s8** argv) {
 	}
 
 #endif
-
+ 
 #if !(_test_windowing)
 	MainRayCast(backbuffer);
 #endif
@@ -384,11 +403,16 @@ s32 main(s32 argc, const s8** argv) {
 			}
 
 			if (event.type == W_EVENT_RESIZE) {
-				WAckResizeEvent(&event);
 
+				printf("I AM RESIZING!!!\n");
+
+				WAckResizeEvent(&event);
+#if 1
 				WDestroyBackBuffer(&backbuffer);
 				backbuffer = WCreateBackBuffer(&window);
+				MainRayCast(backbuffer);
 
+#endif
 			}
 
 			WRetireEvent(&event);
@@ -413,7 +437,7 @@ s32 main(s32 argc, const s8** argv) {
 		f32 diff = GetTimeDifferenceMS(start, end);
 
 		if (diff > 17.0f) {
-		//	printf("-----------\nTIME %f\n", (f64)diff);
+			//	printf("-----------\nTIME %f\n", (f64)diff);
 		}
 #endif
 	}
