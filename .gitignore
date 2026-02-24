@@ -1,5 +1,5 @@
 build/*
 bin/*
+result/*
 include/generated/*
 !include/generated/.gitkeep
-Cu_std/*
