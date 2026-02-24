@@ -9,7 +9,7 @@ if(UNIX)
 	include(${CMAKE_SOURCE_DIR}/cmake/cu.cmake)
 	initsubmodules()
 
-	cmake_minimum_required(VERSION 3.9)
+	cmake_minimum_required(VERSION 3.10)
 	project(copper)
 
 	if(DEBUG)

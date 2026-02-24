@@ -11,14 +11,8 @@
 NOTE: We won't bother with AA for now. It's basically shooting more rays into a
 pixel and blending.
  */
-
-typedef struct Sphere {
-	Vec3 pos;
-	f32 radius;
-} Sphere;
-
 typedef struct RMaterial {
-	Color diffuse;
+	Color4 diffuse;
 	f32 emittance;
 	f32 scatter;
 } RMaterial;
@@ -42,33 +36,18 @@ _global RSphere spheres[] = {
     {.sphere = {{20, 8, 30}, 7}, .material_index = 4},
 };
 _global RPlane planes[] = {
-    {.plane = {{0, -1, 0}, {0, 1, 0}}, .material_index = 1},
+    {.plane = {.norm = {0, -1, 0}, .d = 1}, .material_index = 1},
 };
 
-f32 RandZeroToOne() { return (f32)rand() / (f32)RAND_MAX; }
-f32 RandNegOneToOne() {
+f32 RandZeroToOne(void) { return (f32)rand() / (f32)RAND_MAX; }
+f32 RandNegOneToOne(void) {
 	f32 value = (f32) rand() / (f32)(RAND_MAX >> 2);
 	return value;
 }
-Vec3 ReflectVec3(Vec3 vec, Vec3 normal) {
-	return Vec3Add(vec, Vec3MulConstR(ProjectOntoVec3(vec, normal), 2.0f));
-}
-
-Vec3 GetSphereNormalVe3(Sphere sphere, Point3 point_on_sphere) {
-	Vec3 normal = Vec3Sub(point_on_sphere, sphere.pos);
-
-#ifdef DEBUG
-	//_kill("point is not on sphere\n",MagnitudeVec3(normal) !=
-	// sphere.radius);
-#endif
-
-	return NormalizeVec3(normal);
-}
-
 b32 IntersectOutLine3Sphere(Line3 line, Sphere sphere, Point3* point) {
 	RSphere s = {.sphere = {.pos = {0}, 3}, .material_index = 2};
 
-	Vec3 sphere_to_ray = Vec3Sub(sphere.pos, line.pos);
+	Vec3 sphere_to_ray = SubVec3(sphere.pos, line.pos);
 
 	f32 a = DotVec3(line.dir, line.dir);
 	f32 b = -2.0f * DotVec3(line.dir, sphere_to_ray);
@@ -85,15 +64,15 @@ b32 IntersectOutLine3Sphere(Line3 line, Sphere sphere, Point3* point) {
 	f32 t1 = ((-1.0f * b) - root) / (2.0f * a);
 
 	if (t0 < t1) {
-		*point = Vec3Add((Vec3MulConstR(line.dir, t0)), line.pos);
+		*point = AddVec3((MulConstRVec3(line.dir, t0)), line.pos);
 	} else {
-		*point = Vec3Add((Vec3MulConstR(line.dir, t1)), line.pos);
+		*point = AddVec3((MulConstRVec3(line.dir, t1)), line.pos);
 	}
 
 	return 1;
 }
 
-u32 ColorToPixelColor(Color color) {
+u32 ColorToPixelColor(Color4 color) {
 	color.r = _clampf(color.r, 0.0f, 1.0f);
 	color.g = _clampf(color.g, 0.0f, 1.0f);
 	color.b = _clampf(color.b, 0.0f, 1.0f);
@@ -106,19 +85,19 @@ u32 ColorToPixelColor(Color color) {
 // we need to produce the bounces as well
 u32 CastRay(Vec3 camerapos, Vec3 gridpos) {
 	u32 mat_index = 0;
-	f32 depth = 2147483647;
+	f32 depth = 2147483647.0f;
 	Vec3 next_normal = {0};
 
-	Vec3 dir = NormalizeVec3(Vec3Sub(gridpos, camerapos));
+	Vec3 dir = NormalizeVec3(SubVec3(gridpos, camerapos));
 	Ray3 ray = {camerapos, dir};
 
 	for (u32 i = 0; i < _arraycount(planes); i++) {
 		Point3 hitpoint = {0};
 		RPlane plane = planes[i];
 
-		if (IntersectOutLine3Plane(ray, plane.plane, &hitpoint)) {
+		if (IntersectOutRay3Plane(ray, plane.plane, &hitpoint)) {
 			Vec3 camera_to_hitpoint =
-			    NormalizeVec3(Vec3Sub(hitpoint, camerapos));
+			    NormalizeVec3(SubVec3(hitpoint, camerapos));
 			f32 dot = DotVec3(camera_to_hitpoint, dir);
 
 			if (dot > 0.0f && hitpoint.z < depth) {
@@ -134,18 +113,18 @@ u32 CastRay(Vec3 camerapos, Vec3 gridpos) {
 		RSphere sphere = spheres[i];
 		Point3 hitpoint = {0};
 
-		if (IntersectOutLine3Sphere(ray, sphere.sphere, &hitpoint)) {
+		if (IntersectClosestOutRay3Sphere(ray, sphere.sphere, &hitpoint)) {
 			if (hitpoint.z < depth) {
 				mat_index = sphere.material_index;
 				depth = hitpoint.z;
 
 				next_normal =
-				    GetSphereNormalVe3(sphere.sphere, hitpoint);
+				    GetSphereNormalVec3(sphere.sphere, hitpoint);
 
 // output the sphere normal as the color
 #if 0
 				{
-					Vec3 normal = GetSphereNormalVe3(
+					Vec3 normal = GetSphereNormalVec3(
 					    sphere.sphere, hitpoint);
 					return ColorToPixelColor(
 					    Vec3ToVec4(normal));
@@ -201,9 +180,11 @@ void CastRays(WBackBufferContext* buffer, Vec3 camerapos, f32 z) {
 }
 
 s32 main(s32 argc, const s8** argv) {
+
+	WCreateWindowConnection(WPLATFORM_X11);
+
 	WWindowContext window = WCreateWindow(
-	    "Raytracer",
-	    (WCreateFlags)(W_CREATE_NORESIZE | W_CREATE_BACKEND_XLIB), 0, 0,
+	    "Raytracer",W_CREATE_NORESIZE, 0, 0,
 	    1280, 720);
 
 	WBackBufferContext backbuffer = WCreateBackBuffer(&window);
@@ -218,7 +199,7 @@ s32 main(s32 argc, const s8** argv) {
 		CastRays(&backbuffer, camerapos, 1.0f);
 		WPresentBackBuffer(&window, &backbuffer);
 
-		while (WWaitForWindowEvent(&window, &event)) {
+		while (WWaitForWindowEvent(&event)) {
 			if (event.type == W_EVENT_KBEVENT_KEYDOWN ||
 			    event.type == W_EVENT_CLOSE) {
 				run = 0;

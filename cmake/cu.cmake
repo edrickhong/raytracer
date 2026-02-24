@@ -15,8 +15,8 @@ if(UNIX)
 
     if(BUILD_STEP)
 
-      set(CMAKE_C_COMPILER /usr/bin/clang)
-      set(CMAKE_CXX_COMPILER /usr/bin/clang++)
+			#set(CMAKE_C_COMPILER /usr/bin/clang)
+			#set(CMAKE_CXX_COMPILER /usr/bin/clang++)
 
     endif()
 

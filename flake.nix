@@ -64,7 +64,6 @@
 			configurePhase = ''
 				runHook preConfigure
 
-				cat RefCMakeLists.txt > CMakeLists.txt
 				cmake -S . -B ./build/
 
 				runHook postConfigure
