@@ -1,376 +1,445 @@
-#include "mmath.h"
-#include "mode.h"
-#include "stdio.h"
-#include "stdlib.h"
-#include "string.h"
-#include "ttype.h"
-#include "wwindow.h"
-//#include "random.h"
+#include "main.h"
+
 
 /*
-NOTE: We won't bother with AA for now. It's basically shooting more rays into a
-pixel and blending.
+ * Make rays actual rays instead of lines
+ * make plane use a norm + a t value instead of a norm + pos
+ * TODO: so far so good but the green sphere isn't casting a shadow
+ * pretty sure this is a bug
  */
 
-#define _rays_per_pixel 4
-#define _bounce_depth 32
+#define _test_windowing 0
 
-typedef struct Sphere {
-	Vec3 pos;
-	f32 radius;
-} Sphere;
+// NOTE: this looks very off
+#define _minf32 0xFF7FFFFF
 
-typedef struct RMaterial {
-	Color diffuse;
-	f32 emittance;
-	f32 scatter;
-} RMaterial;
-
-typedef struct RSphere {
-	Sphere sphere;
-	u32 material_index;
-} RSphere;
-
-typedef struct RPlane {
-	Plane plane;
-	u32 material_index;
-} RPlane;
-
-_global RMaterial materials[] = {
-    {0, 0, 1, 1}, {1, 0, 0, 1}, {0, 1, 0, 1}, {1, 1, 0, 1}, {0, 1, 1, 1},
-};
-_global RSphere spheres[] = {
-    {.sphere = {{0, 0, 10}, 3}, .material_index = 2},
-    {.sphere = {{-15, 5, 20}, 5}, .material_index = 3},
-    {.sphere = {{20, 8, 30}, 7}, .material_index = 4},
-};
+// This is our world
+_global RMaterial materials[6] = {0};
 _global RPlane planes[] = {
-    {.plane = {{0, -1, 0}, {0, 1, 0}}, .material_index = 1},
+    {{.norm = {0, 1, 0}, .d = 0.0f}, 1},
 };
 
-f32 RandZeroToOne() { return (f32)rand() / (f32)RAND_MAX; }
-f32 RandNegOneToOne() {
-	f32 value = (f32)rand() / (f32)(RAND_MAX >> 2);
-	return value;
-}
-Vec3 ReflectVec3(Vec3 vec, Vec3 normal) {
-	return Vec3Sub(vec, Vec3MulConstR(ProjectOntoVec3(vec, normal), 2.0f));
+_global RSphere spheres[] = {
+    {{{0}, 1.0f}, 2},
+    {{{3, 0, 2}, 1.0f}, 3},
+    {{{-2, 2, 1}, 1.0f}, 4},
+    {{{1, 3, 1}, 1.0f}, 5},
+};
+
+Vec3 GetRayOffset(u32 x, u32 y, Vec3 camera_x, Vec3 camera_y,
+		  Vec2 half_grid_dim, WBackBufferContext buffer) {
+	f32 half_grid_w = half_grid_dim.x;
+	f32 half_grid_h = half_grid_dim.y;
+
+	f32 grid_y = ((f32)y) / (f32)(buffer.height) * -2.0f + 1.0f;
+	f32 grid_x = ((f32)x) / (f32)(buffer.width) * 2.0f - 1.0f;
+	Vec3 offset_x = MulConstRVec3(camera_x, grid_x * half_grid_w);
+	Vec3 offset_y = MulConstRVec3(camera_y, grid_y * half_grid_h);
+
+	return AddVec3(offset_x, offset_y);
 }
 
-Vec3 GetSphereNormalVe3(Sphere sphere, Point3 point_on_sphere) {
-	Vec3 normal = Vec3Sub(point_on_sphere, sphere.pos);
+Vec3 GetJitterOffset(Vec3 camera_x, Vec3 camera_y, Vec2 half_grid_dim,
+		     WBackBufferContext buffer) {
+	Vec3 start =
+	    GetRayOffset(0, 0, camera_x, camera_y, half_grid_dim, buffer);
+	Vec3 end =
+	    GetRayOffset(1, 1, camera_x, camera_y, half_grid_dim, buffer);
 
-#ifdef DEBUG
-//_kill("point is not on sphere\n",MagnitudeVec3(normal) !=
-// sphere.radius);
+	Vec3 diff = MulConstRVec3(SubVec3(end, start), 0.5f);
+
+	diff.x *= RandNegOneToOne();
+	diff.y *= RandNegOneToOne();
+	diff.z *= RandNegOneToOne();
+
+	return diff;
+}
+
+#define _bounce_count 16
+#define _rays_per_pixel 32
+
+Color3 CastRay(Ray3 ray) {
+	Color3 out_color = {0};
+	Vec3 atten = {1, 1, 1};
+
+#define _debug_plane 0
+
+#if _debug_plane
+	b32 plane_hit = false;
 #endif
 
-	return NormalizeVec3(normal);
-}
+	f32 cur_t = (f32)_maxf32;
 
-b32 IntersectOutLine3Sphere(Line3 line, Sphere sphere, Point3* point) {
-	RSphere s = {.sphere = {.pos = {0}, 3}, .material_index = 2};
+	for (u32 r = 0; r < _bounce_count; r++) {
+		u32 hit_material = 0;
+		Vec3 next_point = {0};
+		Vec3 next_normal = {0};
 
-	Vec3 ray_to_sphere = Vec3Sub(sphere.pos, line.pos);
+		for (u32 i = 0; i < _arraycount(planes); i++) {
+			RPlane rplane = planes[i];
 
-	f32 a = DotVec3(line.dir, line.dir);
-	f32 b = -2.0f * DotVec3(line.dir, ray_to_sphere);
-	f32 c = DotVec3(ray_to_sphere, ray_to_sphere) -
-		(sphere.radius * sphere.radius);
-	f32 discriminant = (b * b) - (4.0f * a * c);
+			Vec3 hit_point = {0};
 
-	if (discriminant < 0.0f) {
-		return 0;
-	}
+			if (IntersectOutRay3Plane(ray, rplane.plane,
+						  &hit_point)) {
+				Vec3 hit_to_ray = SubVec3(hit_point, ray.pos);
+				f32 t = DotVec3(hit_to_ray, ray.dir);
 
-	f32 root = sqrtf(discriminant);
-	f32 t0 = ((-1.0f * b) + root) / (2.0f * a);
-	f32 t1 = ((-1.0f * b) - root) / (2.0f * a);
-
-	// This is ray specific. TODO: don't treat rays as lines
-
-	if (t0 <= 0.0f && t1 <= 0.0f) {
-		return 0;
-	}
-
-	if (t0 < t1) {
-		*point = Vec3Add((Vec3MulConstR(line.dir, t0)), line.pos);
-	} else {
-		*point = Vec3Add((Vec3MulConstR(line.dir, t1)), line.pos);
-	}
-
-	return 1;
-}
-
-u32 ColorToPixelColor(Color color) {
-	color.r = _clampf(color.r, 0.0f, 1.0f);
-	color.g = _clampf(color.g, 0.0f, 1.0f);
-	color.b = _clampf(color.b, 0.0f, 1.0f);
-	color.a = _clampf(color.a, 0.0f, 1.0f);
-
-	return _encode_argb((u32)(color.a * 255.0f), (u32)(color.r * 255.0f),
-			    (u32)(color.g * 255.0f), (u32)(color.b * 255.0f));
-}
-
-Vec3 ClampVec3(Vec3 vec) {
-	vec.x = _clampf(vec.x, 0.0f, 1.0f);
-	vec.y = _clampf(vec.y, 0.0f, 1.0f);
-	vec.z = _clampf(vec.z, 0.0f, 1.0f);
-
-	return vec;
-}
-
-Vec4 ClampVec4(Vec4 vec) {
-	vec.x = _clampf(vec.x, 0.0f, 1.0f);
-	vec.y = _clampf(vec.y, 0.0f, 1.0f);
-	vec.z = _clampf(vec.z, 0.0f, 1.0f);
-	vec.w = _clampf(vec.w, 0.0f, 1.0f);
-
-	return vec;
-}
-
-void ComputeBounceRays(Ray3 ray, Vec3* attenuation, u32 depth) {
-	if (depth > _bounce_depth) {
-		return;
-	}
-
-	depth++;
-
-	u32 is_hit = 0;
-	Vec3 next_point = {0, 0, 2147483647.0f};
-	Vec3 next_normal = {0};
-
-	for (u32 i = 0; i < _arraycount(planes); i++) {
-		Point3 hitpoint = {0};
-		RPlane plane = planes[i];
-
-		if (IntersectOutLine3Plane(ray, plane.plane, &hitpoint)) {
-			Vec3 ray_to_hitpoint =
-			    NormalizeVec3(Vec3Sub(hitpoint, ray.pos));
-			f32 dot = DotVec3(ray_to_hitpoint, ray.dir);
-
-			if (dot > 0.0f && hitpoint.z < next_point.z) {
-				is_hit = 1;
-				next_point = hitpoint;
-				next_normal = plane.plane.norm;
-			}
-		}
-	}
-
-	for (u32 i = 0; i < _arraycount(spheres); i++) {
-		RSphere sphere = spheres[i];
-		Point3 hitpoint = {0};
-
-		// FIXME: the sphere is intersecting itself
-		if (IntersectOutLine3Sphere(ray, sphere.sphere, &hitpoint)) {
-			if (hitpoint.z < next_point.z) {
-				is_hit = 1;
-				next_point = hitpoint;
-				next_normal =
-				    GetSphereNormalVe3(sphere.sphere, hitpoint);
-			}
-		}
-	}
-
-	if (is_hit) {
-		// This is the direct reflected light
-		Vec3 reflected =
-		    NormalizeVec3(ReflectVec3(ray.dir, next_normal));
-		Ray3 next_ray = {next_point, reflected};
-
-		ComputeBounceRays(next_ray, attenuation, depth);
-		*attenuation = Vec3MulConstR(*attenuation, 0.5f);
-	}
-}
-
-// we need to produce the bounces as well
-Color CastRay(Ray3 ray) {
-	u32 mat_index = 0;
-	Vec3 next_point = {0, 0, 2147483647.0f};
-	Vec3 next_normal = {0};
-
-	for (u32 i = 0; i < _arraycount(planes); i++) {
-		Point3 hitpoint = {0};
-		RPlane plane = planes[i];
-
-		if (IntersectOutLine3Plane(ray, plane.plane, &hitpoint)) {
-			Vec3 ray_to_hitpoint =
-			    NormalizeVec3(Vec3Sub(hitpoint, ray.pos));
-			f32 dot = DotVec3(ray_to_hitpoint, ray.dir);
-
-			if (dot > 0.0f && hitpoint.z < next_point.z) {
-				mat_index = plane.material_index;
-
-				next_point = hitpoint;
-				next_normal = plane.plane.norm;
-			}
-		}
-	}
-
-	for (u32 i = 0; i < _arraycount(spheres); i++) {
-		RSphere sphere = spheres[i];
-		Point3 hitpoint = {0};
-
-		if (IntersectOutLine3Sphere(ray, sphere.sphere, &hitpoint)) {
-			if (hitpoint.z < next_point.z) {
-				mat_index = sphere.material_index;
-
-				next_point = hitpoint;
-				next_normal =
-				    GetSphereNormalVe3(sphere.sphere, hitpoint);
-
-// output the sphere normal as the color
-#if 0
-				{
-					Vec3 normal = GetSphereNormalVe3(
-					    sphere.sphere, hitpoint);
-					return ColorToPixelColor(
-					    Vec3ToVec4(normal));
+				if (t < cur_t) {
+					next_normal = rplane.plane.norm;
+					next_point = hit_point;
+					hit_material = rplane.material_index;
+					cur_t = t;
 				}
+			}
+		}
+
+		for (u32 i = 0; i < _arraycount(spheres); i++) {
+			RSphere rsphere = spheres[i];
+
+			Vec3 hit_point = {0};
+
+			if (IntersectClosestOutRay3Sphere(ray, rsphere.sphere,
+							  &hit_point)) {
+				Vec3 hit_to_ray = SubVec3(hit_point, ray.pos);
+				f32 t = DotVec3(hit_to_ray, ray.dir);
+
+				if (t < cur_t) {
+					next_normal = GetSphereNormalVec3(
+					    rsphere.sphere, hit_point);
+					next_point = hit_point;
+					hit_material = rsphere.material_index;
+					cur_t = t;
+				}
+			}
+		}
+
+		RMaterial material = materials[hit_material];
+		// if we actually hit something
+		if (hit_material) {
+			out_color =
+			    AddVec3(out_color, SchurVec3(atten, material.emit));
+			f32 dot =
+			    DotVec3(MulConstRVec3(ray.dir, -1.0f), next_normal);
+
+			if (dot < 0.0f) {
+				dot = 0.0f;
+			}
+
+#if 1
+			Color3 refl_color = MulConstRVec3(material.refl, dot);
+#else
+			Color3 refl_color = material.refl;
 #endif
-			}
-		}
-	}
 
-	Color color = materials[mat_index].diffuse;
-	if (mat_index) {
-		//if (mat_index == 2) _breakpoint();
-		Vec3 attenuation = {0};
-		// This is the direct reflected light
-		{
-			Vec3 refl_attenuation = {1, 1, 1};
+			atten = SchurVec3(atten, refl_color);
 
-			Vec3 reflected =
+			// NOTE: this is the direct bounce ray
+			Vec3 bounce_ray =
 			    NormalizeVec3(ReflectVec3(ray.dir, next_normal));
-			Ray3 next_ray = {next_point,
-					 reflected};  // directly reflected ray
+			Vec3 scatter_ray = {RandNegOneToOne(),
+					    RandNegOneToOne(),
+					    RandNegOneToOne()};
 
-			ComputeBounceRays(next_ray, &refl_attenuation, 0);
-			attenuation = Vec3Add(attenuation, refl_attenuation);
-		}
-
-		for (u32 i = 0; i < _rays_per_pixel; i++) {
-			// this is the scattered light
-
-			Vec3 scattered_attenuation = {1, 1, 1};
-
-			Vec3 scattered = {RandNegOneToOne(), RandNegOneToOne(),
-					  RandNegOneToOne()};
-
-			if (DotVec3(scattered, next_normal) < 0.0f) {
-				scattered = NormalizeVec3(
-				    ReflectVec3(scattered, next_normal));
+			if (DotVec3(scatter_ray, next_normal) < 0.0f) {
+				scatter_ray =
+				    ReflectVec3(scatter_ray, next_normal);
 			}
 
-			Ray3 next_ray = {next_point, scattered};
-			ComputeBounceRays(next_ray, &scattered_attenuation, 0);
-			attenuation =
-			    Vec3Add(attenuation, scattered_attenuation);
+			Vec3 next_dir =
+			    LerpVec3(scatter_ray, bounce_ray, material.scatter);
+
+			ray.dir = NormalizeVec3(next_dir);
+			ray.pos = next_point;
+
+#if _debug_plane
+
+			if (r == 0 && hit_material == 1) {
+				plane_hit = true;
+			}
+
+			if (plane_hit && r == 1) {
+				printf("PLANE HIT %d\n", hit_material);
+
+				if (hit_material == 4) {
+					Color3 new_color = {1, 1, 0};
+					return new_color;
+				}
+			}
+#endif
 		}
 
-		attenuation = ClampVec3(attenuation);
-
-		color = CompMulVec4(color, Vec3ToVec4(attenuation));
+		else {
+			out_color =
+			    AddVec3(out_color, SchurVec3(atten, material.emit));
+			break;
+		}
 	}
 
-	return color;
+	return out_color;
 }
 
-// maps a pixel to a 3d grid. the vector is at the top left of the pixel, not
-// the center
-Vec3 PixelPosToGridPos(u32 x, u32 y, u32 width, u32 height, f32 z) {
-	/*
-	 *grid coords go from -1 <= x <= 1 and -1 <= y <= 1
-	 * */
-	Vec3 gridpos = {0};
+void MainRayCast(WBackBufferContext buffer) {
+	// this setups up the materials
 
-	f32 h_w = (f32)(width >> 1);
-	f32 h_h = (f32)(height >> 1);
+	// Sky material
+	materials[0].emit.x = 0.3f;
+	materials[0].emit.y = 0.4f;
+	materials[0].emit.z = 0.5f;
+	materials[0].scatter = 0;
 
-	gridpos.x = ((f32)(x)-h_w) / h_w;
-	gridpos.y = (((f32)(y)-h_h) / h_h) * -1.0f;
-	gridpos.z = z;
+	// plane material
+	materials[1].refl.x = 0.5;
+	materials[1].refl.y = 0.5f;
+	materials[1].refl.z = 0.5f;
+	materials[1].scatter = 0;
 
-	if (width > height) {
-		gridpos.y *= (f32)height / (f32)width;
-	} else if (height > width) {
-		gridpos.x *= (f32)width / (f32)height;
+	// sphere material
+	materials[2].refl.x = 0.7f;
+	materials[2].refl.y = 0.5f;
+	materials[2].refl.z = 0.3f;
+	materials[2].scatter = 0;
+
+	materials[3].emit.x = 4.0;
+	materials[3].emit.y = 0.0f;
+	materials[3].emit.z = 0.0f;
+	materials[3].scatter = 0;
+
+	materials[4].refl.x = 0.2f;
+	materials[4].refl.y = 0.8f;
+	materials[4].refl.z = 0.2f;
+	materials[4].scatter = 0.7f;
+
+	materials[5].refl.x = 0.4f;
+	materials[5].refl.y = 0.8f;
+	materials[5].refl.z = 0.9f;
+	materials[5].scatter = 0.85f;
+
+	Vec3 world_y = {0, 1, 0};
+
+	Vec3 camerapos = {0, 1.0f, -10.0f};
+
+	Vec3 camera_z = NormalizeVec3(MulConstRVec3(camerapos, -1.0f));
+	Vec3 camera_x = NormalizeVec3(CrossVec3(world_y, camera_z));
+	Vec3 camera_y = NormalizeVec3(CrossVec3(camera_z, camera_x));
+
+	f32 grid_dist = 1.0f;
+	f32 grid_w = 1.0f;
+	f32 grid_h = 1.0f;
+
+	if (buffer.width > buffer.height) {
+		grid_h = ((f32)buffer.height) / (f32)buffer.width;
 	}
 
-	return gridpos;
-}
-
-void CastRays(WBackBufferContext* buffer, Vec3 camerapos, f32 z) {
-	Vec3 grid_width;
-	Vec3 grid_height;
-
-	{
-		Vec3 start =
-		    PixelPosToGridPos(0, 0, buffer->width, buffer->height, 1);
-
-		Vec3 x =
-		    PixelPosToGridPos(1, 0, buffer->width, buffer->height, 1);
-		Vec3 y =
-		    PixelPosToGridPos(0, 1, buffer->width, buffer->height, 1);
-
-		grid_width = Vec3Sub(x, start);
-		grid_height = Vec3Sub(y, start);
+	else if (buffer.height > buffer.width) {
+		grid_w = ((f32)buffer.width) / (f32)buffer.height;
 	}
 
-	for (u32 y = 0; y < buffer->height; y++) {
-		for (u32 x = 0; x < buffer->width; x++) {
-			Vec3 gridpos = PixelPosToGridPos(x, y, buffer->width,
-							 buffer->height, 1.0f);
+	f32 half_grid_w = grid_w * 0.5f;
+	f32 half_grid_h = grid_h * 0.5f;
 
-			Color color = {0};
+	Vec2 half_grid_dim = {half_grid_w, half_grid_h};
+
+	Vec3 grid_center = MulConstRVec3(camera_z, grid_dist);
+
+	for (u32 y = 0; y < buffer.height; y++) {
+		for (u32 x = 0; x < buffer.width; x++) {
+			Vec3 main_offset = GetRayOffset(
+			    x, y, camera_x, camera_y, half_grid_dim, buffer);
+
+			Color3 color = {0};
 
 			for (u32 i = 0; i < _rays_per_pixel; i++) {
-				Vec3 rand_offset =
-				    Vec3Add(grid_width, grid_height);
-				rand_offset =
-				    Vec3MulConstR(rand_offset, RandZeroToOne());
-				gridpos = Vec3Add(gridpos, rand_offset);
-				Vec3 dir =
-				    NormalizeVec3(Vec3Sub(gridpos, camerapos));
-				Ray3 ray = {camerapos, dir};
-				color = Vec4Add(color, CastRay(ray));
+				Vec3 jitter_offset = GetJitterOffset(
+				    camera_x, camera_y, half_grid_dim, buffer);
+
+				Vec3 final_offset =
+				    AddVec3(main_offset, jitter_offset);
+
+				Vec3 ray_dir = NormalizeVec3(
+				    AddVec3(grid_center, final_offset));
+
+				Ray3 ray = {camerapos, ray_dir};
+				color = AddVec3(color, CastRay(ray));
 			}
 
-			color = Vec4DivConstR(color, (f32)_rays_per_pixel);
+			color =
+			    MulConstRVec3(color, 1.0f / (f32)_rays_per_pixel);
 
-			u32* pixel = buffer->pixels + (buffer->width * y) + x;
+			u32* pixel = buffer.pixels + (y * buffer.width) + x;
 			*pixel = ColorToPixelColor(color);
+		}
+#define _enable_status 1
+
+		// status
+#if _enable_status
+		{
+			f32 cur_count = (f32)((y * buffer.width));
+			f32 total_count = (f32)(buffer.width * buffer.height);
+
+			f32 progress = 100.0f * (cur_count / total_count);
+
+			printf("\rCasting progress: %f %%", (f64)progress);
+		}
+
+#endif
+	}
+
+#if _enable_status
+
+	printf("\n");
+
+#endif
+}
+
+#define _enable_threading 0
+
+#if _enable_threading
+
+#include "tthreadx.h"
+_global volatile ThreadWorkQueue work_que = {};
+
+void ThreadProc(void* args) {
+	TSemaphore sem = *(TSemaphore*)args;
+	for (;;) {
+		TWaitSemaphore(sem);
+		while (ExecuteThreadWorkQueue()) {
 		}
 	}
 }
+#endif
+
+#if 0
+#include "ccontroller.h"
+#endif
 
 s32 main(s32 argc, const s8** argv) {
-	WWindowContext window = WCreateWindow(
-	    "Raytracer",
-	    (WCreateFlags)(W_CREATE_NORESIZE | W_CREATE_BACKEND_XLIB), 0, 0,
-	    720, 480);
+
+	//NOTE: testing NMAKE defines
+#if 0
+
+	//TODO: in NMAKE, __WIN32 is not defined
+
+#ifdef __WIN32
+	printf("DEFINED!\n");
+#endif
+
+#ifndef __WIN32
+	printf("NOT DEFINED\n");
+	return 0;
+#endif
+
+#endif
+
+
+#if 0
+	CInitControllers();
+	return 0;
+#endif
+
+	WPlatform array[2] = {0};
+	u32 count = 0;
+
+	WGetPlatforms(array, &count, false);
+
+	WPlatform platform = WPLATFORM_NONE;
+
+	for (u32 i = 0; i < count; i++) {
+		WPlatform p = array[i];
+		if (p == WPLATFORM_WAYLAND) {
+			platform = p;
+			break;
+		}
+	}
+
+	if (platform == WPLATFORM_NONE) {
+		platform = array[0];
+	}
+
+	WCreateWindowConnection(platform);
+
+	WCreateFlags flags = 0;
+
+#if !(_test_windowing)
+	flags |= W_CREATE_NORESIZE;
+#endif
+
+	WWindowContext window =
+	    WCreateWindow("Raytracer", flags, 0, 0, 1080, 720);
 
 	WBackBufferContext backbuffer = WCreateBackBuffer(&window);
 	WWindowEvent event = {0};
 
-	b32 run = 1;
+	b32 run = true;
 
-	Vec3 camerapos = {0};
+#if _enable_threading
 
-	printf("casting %d rays...\n",
-	       backbuffer.width * backbuffer.height * _rays_per_pixel);
+	TSemaphore sem = TCreateSemaphore(0);
 
-	CastRays(&backbuffer, camerapos, 1.0f);
+	for (u32 i = 0; i < SGetTotalThreads(); i++) {
+		TCreateThread(ThreadProc, _kilobytes(22), &sem);
+	}
+
+#endif
+ 
+#if !(_test_windowing)
+	MainRayCast(backbuffer);
+#endif
 
 	while (run) {
-		WPresentBackBuffer(&window, &backbuffer);
+#if _test_windowing
+		TimeSpec start = {0};
+		GetTime(&start);
+#endif
 
-		while (WWaitForWindowEvent(&window, &event)) {
+		// TODO: In wayland, we should request a throttle
+		// wl_surface::frame - request a frame throttling hint
+		SleepMS(16.0f);
+
+		while (WWaitForWindowEvent(&event)) {
 			if (event.type == W_EVENT_KBEVENT_KEYDOWN ||
 			    event.type == W_EVENT_CLOSE) {
 				run = 0;
 			}
+
+			if (event.type == W_EVENT_RESIZE) {
+
+				printf("I AM RESIZING!!!\n");
+
+				WAckResizeEvent(&event);
+#if 1
+				WDestroyBackBuffer(&backbuffer);
+				backbuffer = WCreateBackBuffer(&window);
+				MainRayCast(backbuffer);
+
+#endif
+			}
+
+			WRetireEvent(&event);
 		}
+
+#if _test_windowing
+
+		// TODO: snap resizes are not working
+		// profile
+		// I doubt it is the fill
+		u32 total_pixels = backbuffer.width * backbuffer.height;
+		for (u32 i = 0; i < total_pixels; i++) {
+			backbuffer.pixels[i] = _encode_argb(255, 0, 0, 255);
+		}
+#endif
+		WPresentBackBuffer(&window, &backbuffer);
+
+#if _test_windowing
+		TimeSpec end = {0};
+		GetTime(&end);
+
+		f32 diff = GetTimeDifferenceMS(start, end);
+
+		if (diff > 17.0f) {
+			//	printf("-----------\nTIME %f\n", (f64)diff);
+		}
+#endif
 	}
 
 	return 0;

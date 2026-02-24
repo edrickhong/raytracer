@@ -14,20 +14,37 @@ if(UNIX)
 
 	if(DEBUG)
 		# -mavx 
-		set(OPT_FLAGS "-g -Og -fno-omit-frame-pointer -fstack-protector-strong")
+		set(OPT_FLAGS "-g -O0 -fno-omit-frame-pointer -fstack-protector-strong")
 
 	endif()
 
-	set(
-		FLAGS_CXX
-		"-msse4.1 -mfma -fdiagnostics-absolute-paths -fvisibility=hidden -march=x86-64 -fno-fast-math -fno-exceptions -fno-rtti -std=c++14 ${OPT_FLAGS} ${STRICT_FLAGS} ${CLANG_DEBUG}"
-		)
+	if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+
+		set(
+			FLAGS_CXX
+			"-msse4.1 -mfma -fdiagnostics-absolute-paths -fvisibility=hidden -march=x86-64 -fno-fast-math -fno-exceptions -fno-rtti -std=c++14 ${OPT_FLAGS} ${STRICT_FLAGS} ${CLANG_DEBUG}"
+			)
 
 
-	set(
-		FLAGS_C
-		"-msse4.1 -mfma -fdiagnostics-absolute-paths -fvisibility=hidden -march=x86-64 -fno-fast-math -fno-exceptions -fno-rtti -std=c11 ${OPT_FLAGS} ${STRICT_FLAGS} ${CLANG_DEBUG}"
-		)
+		set(
+			FLAGS_C
+			"-msse4.1 -mfma -fdiagnostics-absolute-paths -fvisibility=hidden -march=x86-64 -fno-fast-math -fno-exceptions -std=c11 ${OPT_FLAGS} ${STRICT_FLAGS} ${CLANG_DEBUG}"
+			)
+
+	elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+
+		set(
+			FLAGS_CXX
+			"-msse4.1 -mfma -fvisibility=hidden -march=x86-64 -fno-fast-math -fno-exceptions -fno-rtti -std=c++14 ${OPT_FLAGS} "
+			)
+
+
+		set(
+			FLAGS_C
+			"-msse4.1 -mfma -fvisibility=hidden -march=x86-64 -fno-fast-math -fno-exceptions -std=c11 ${OPT_FLAGS} "
+			)
+
+	endif()
 
 else(UNIX)
 
