@@ -14,7 +14,7 @@ if(UNIX)
 
 	if(DEBUG)
 		# -mavx 
-		set(OPT_FLAGS "-g -O0 -fno-omit-frame-pointer -fstack-protector-strong")
+		set(OPT_FLAGS "-g -Og -fno-omit-frame-pointer -fstack-protector-strong")
 
 	endif()
 
@@ -48,7 +48,7 @@ if(UNIX)
 
 else(UNIX)
 
-	cmake_minimum_required(VERSION 3.9)
+	cmake_minimum_required(VERSION 3.10)
 	project(copper)
 
 	# sets internal libs paths and flags

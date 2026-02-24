@@ -13,10 +13,8 @@ if(UNIX)
 
   if(DEBUG)
 
-    if(BUILD_STEP)
+		if(BUILD_STEP) #TODO: looks like we don't use this anymore
 
-      set(CMAKE_C_COMPILER /usr/bin/clang)
-      set(CMAKE_CXX_COMPILER /usr/bin/clang++)
 
     endif()
 

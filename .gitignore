@@ -1,5 +1,6 @@
 build/*
 bin/*
 result/*
+result/
 include/generated/*
 !include/generated/.gitkeep

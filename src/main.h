@@ -25,8 +25,8 @@ typedef struct RPlane {
 	u32 material_index;
 } RPlane;
 
-f32 RandZeroToOne() { return (f32)rand() / (f32)RAND_MAX; }
-f32 RandNegOneToOne() { return (2.0f * RandZeroToOne()) - 1.0f; }
+f32 RandZeroToOne(void) { return (f32)rand() / (f32)RAND_MAX; }
+f32 RandNegOneToOne(void) { return (2.0f * RandZeroToOne()) - 1.0f; }
 
 
 
@@ -67,7 +67,7 @@ u32 ColorToPixelColor(Color3 color) {
 	color.G = LinearToSRGB(color.G);
 	color.B = LinearToSRGB(color.B);
 
-	return _encode_argb((u32)(255.0f), (u32)(color.r * 255.0f),
+	return Encode_ARGB((u32)(255.0f), (u32)(color.r * 255.0f),
 			    (u32)(color.g * 255.0f), (u32)(color.b * 255.0f));
 }
 

@@ -45,7 +45,9 @@
       CC = "${pkgs.clang}/bin/clang";
       CXX = "${pkgs.clang}/bin/clang++";
 
+
       shellHook = ''
+			export LD_LIBRARY_PATH=${pkgs.lib.makeLibraryPath build_deps}:$LD_LIBRARY_PATH
       PS1="(dev) \u@\h:\w$ "
       echo ">>> cu_std dev shell: CC=$CC CXX=$CXX"
       '';
@@ -64,6 +66,7 @@
 			configurePhase = ''
 				runHook preConfigure
 
+				ls
 				cmake -S . -B ./build/
 
 				runHook postConfigure
